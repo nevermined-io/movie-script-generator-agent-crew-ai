@@ -1,0 +1,3 @@
+"""
+Movie Script Generator Package
+""" 
