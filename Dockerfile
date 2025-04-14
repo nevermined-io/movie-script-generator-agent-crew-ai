@@ -26,8 +26,5 @@ COPY setup.py .
 # Set environment variables
 ENV PYTHONPATH=/app
 
-# Copy and load environment variables at runtime
-COPY .env .
-
 # Command to run the application
 CMD set -a && . ./.env && set +a && python run.py
