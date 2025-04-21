@@ -8,9 +8,11 @@ from langchain_openai import ChatOpenAI
 from src.tasks.script_tasks import ScriptTasks
 from src.agents.script_agents.script_writer_agent import ScriptWriterAgent
 from src.agents.script_agents.scene_transformer_agent import SceneTransformerAgent
+from src.utils.logger import logger
 from crewai.process import Process
 import json
 import math
+import traceback
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 class MovieScriptGenerator:
@@ -48,12 +50,36 @@ class MovieScriptGenerator:
         @return Dictionary containing the complete script details
         """
         try:
+            # Log start of script generation
+            logger.log_script_generation(
+                task_id="internal",
+                status="generating",
+                metadata={
+                    "title": title,
+                    "tags": tags,
+                    "lyrics": lyrics,
+                    "idea": idea,
+                    "duration": duration
+                }
+            )
+
             # Create agents
             script_writer = ScriptWriterAgent.create(self.llm)
             scene_transformer = SceneTransformerAgent.create(self.llm)
             minScenes = math.floor(duration / 10)
             maxScenes = math.floor(duration / 5)
             meanScenes = math.floor((minScenes + maxScenes) / 2)
+
+            # Log agent creation
+            logger.log_script_generation(
+                task_id="internal",
+                status="agents_created",
+                metadata={
+                    "min_scenes": minScenes,
+                    "max_scenes": maxScenes,
+                    "mean_scenes": meanScenes
+                }
+            )
 
             # Create tasks with assigned agents
             tasks = [
@@ -72,24 +98,50 @@ class MovieScriptGenerator:
                 verbose=True
             )
 
-            # Execute and get initial result
+            # Log crew kickoff
+            logger.log_script_generation(
+                task_id="internal",
+                status="crew_started",
+                metadata={
+                    "total_tasks": len(tasks)
+                }
+            )
+
+            # Execute crew tasks
             result = crew.kickoff()
-            
-            # Access results through the CrewOutput object
-            # Each task has a name based on the static method that created it
-            script_result = result.tasks_output[0].raw
-            scenes_result = result.tasks_output[1].json_dict['scenes']
-            settings_result = result.tasks_output[2].json_dict['settings']
-            characters_result = result.tasks_output[3].json_dict['characters']
-            transformed_scenes_result = result.tasks_output[4].json_dict['transformedScenes']
-            
-            return {
-                "script": script_result,
-                "scenes": scenes_result,
-                "settings": settings_result,
-                "characters": characters_result,
-                "transformedScenes": transformed_scenes_result
+            print(result.tasks_output[4])
+
+            # Process results from CrewOutput
+            script_result = {
+                "script": result.tasks_output[0].raw,  # Script from first task
+                "scenes": result.tasks_output[1].json_dict["scenes"],  # Extracted scenes from second task
+                "settings": result.tasks_output[2].json_dict["settings"],  # Settings from third task
+                "characters": result.tasks_output[3].json_dict["characters"],  # Characters from fourth task
+                "transformedScenes": result.tasks_output[4].json_dict["scenes"]  # Transformed scenes from fifth task
             }
+
+            # Log successful generation
+            logger.log_script_generation(
+                task_id="internal",
+                status="generation_complete",
+                metadata={
+                    "total_scenes": len(script_result["scenes"]),
+                    "total_characters": len(script_result["characters"])
+                }
+            )
+
+            return script_result
+
         except Exception as e:
-            print(f"Error during script generation: {str(e)}")
+            print(traceback.format_exc())
+            # Log error
+            logger.log_script_generation(
+                task_id="internal",
+                status="generation_failed",
+                metadata={
+                    "title": title,
+                    "duration": duration
+                },
+                error=str(e)
+            )
             raise 

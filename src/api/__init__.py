@@ -1,5 +1,5 @@
 """
-API module for the movie script generation system
+API initialization module.
 """
-
-from .routes import app 
+from fastapi import FastAPI
+from .app import app 

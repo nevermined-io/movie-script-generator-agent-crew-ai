@@ -3,7 +3,7 @@ Main entry point for the movie script generation API
 """
 
 import uvicorn
-from src.api.routes import app
+from api.app import app
 
 def main():
     """Start the FastAPI application with uvicorn"""
