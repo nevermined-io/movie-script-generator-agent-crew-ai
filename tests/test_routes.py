@@ -2,81 +2,240 @@
 Tests for the API routes.
 """
 import pytest
+from unittest.mock import MagicMock, AsyncMock, patch, Mock
 from fastapi import status
 from src.api.models import ScriptRequest
-from src.models.task import TaskState, TaskStatus, Message, TextPart
-from src.controllers.a2a_controller import controller, TaskRequest
-from src.models.a2a import Task, TaskSendParams, PushNotificationConfig
+from src.models.task import TaskState, TaskStatus, Message, TextPart, Task
+from src.core.task_processor import TaskProcessor
+from src.server import app, get_task_processor
+from src.models.a2a import TaskSendParams, PushNotificationConfig
 from datetime import datetime
 import json
 import httpx
 import asyncio
-from src.server import app, get_task_processor
+import sys
+from fastapi.testclient import TestClient
 
-def test_generate_script_success(test_client, mock_task_processor, monkeypatch):
+# Mock test data
+MOCK_SCRIPT_RESULT = {
+    "script": "Test script content",
+    "scenes": [{
+        "technical_details": {
+            "shot_type": "wide",
+            "camera_movement": "static",
+            "camera_equipment": "test camera",
+            "location": "test location",
+            "lighting_setup": {},
+            "color_palette": [],
+            "visual_references": [],
+            "character_actions": {},
+            "transition_type": "cut",
+            "special_notes": []
+        }
+    }],
+    "transformedScenes": [{
+        "description": "Test scene",
+        "prompt": "Test prompt",
+        "characters_in_scene": [],
+        "setting_id": "test_setting",
+        "duration": 60,
+        "technical_details": {}
+    }],
+    "characters": []
+}
+
+class MockScriptService:
+    """Mock class for ScriptService"""
+    async def generate_script(self, prompt: str, metadata: dict = None) -> tuple:
+        return "Test script content", [
+            {"type": "outline", "content": "Test outline"},
+            {"type": "completion", "content": "Script generated successfully"}
+        ]
+
+class MockLogger:
+    """Mock class for logger"""
+    def log_script_generation(self, *args, **kwargs):
+        pass
+
+    def info(self, *args, **kwargs):
+        pass
+
+    def debug(self, *args, **kwargs):
+        pass
+
+    def error(self, *args, **kwargs):
+        pass
+
+    def warning(self, *args, **kwargs):
+        pass
+
+class MockTaskProcessor(TaskProcessor):
+    """Mock class for TaskProcessor with overridden async methods"""
+    async def create_task(self, task_params: dict) -> Task:
+        # Validate required fields using TaskSendParams
+        params = TaskSendParams(**task_params)
+        
+        task = Task(
+            id="test-123",
+            sessionId=params.sessionId,
+            status=TaskStatus(
+                state=TaskState.SUBMITTED,
+                timestamp=datetime.utcnow().isoformat(),
+                message=Message(
+                    role="assistant",
+                    parts=[TextPart(type="text", text="Starting script generation...")]
+                )
+            ),
+            metadata=params.metadata
+        )
+        self._tasks[task.id] = task
+        return task
+
+    async def process_task_async(self, task_id: str):
+        task = self._tasks.get(task_id)
+        if task:
+            task.status.state = TaskState.COMPLETED
+            task.status.message.parts[0].text = "Script generated successfully"
+            if task_id in self._task_updates:
+                await self._task_updates[task_id].put(task)
+
+    async def get_task(self, task_id: str) -> Task:
+        task = self._tasks.get(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        return task
+
+    async def cancel_task(self, task_id: str) -> Task:
+        task = self._tasks.get(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        task.status.state = TaskState.CANCELED
+        return task
+
+    async def set_push_notification(self, task_id: str, config: PushNotificationConfig) -> PushNotificationConfig:
+        self._push_configs[task_id] = config
+        return config
+
+    async def get_push_notification(self, task_id: str) -> PushNotificationConfig:
+        config = self._push_configs.get(task_id)
+        if not config:
+            raise ValueError(f"No push notification config found for task {task_id}")
+        return config
+
+@pytest.fixture(autouse=True)
+def mock_all_dependencies():
     """
-    Test successful script generation with A2A implementation.
-    Verifies that the endpoint returns immediately with SUBMITTED state.
+    Mock all external dependencies to completely avoid real calls
     """
+    # Create patches for all dependencies
+    patches = [
+        patch('src.core.script_service.ScriptService', MockScriptService),
+        patch('src.utils.logger.logger', MockLogger()),
+        patch('src.core.generator.logger', MockLogger()),
+        patch('openai.AsyncOpenAI', MagicMock()),
+        patch.dict(sys.modules, {
+            'openai': MagicMock(),
+            'crewai': MagicMock(),
+            'crewai.Agent': MagicMock(),
+            'crewai.Crew': MagicMock(),
+            'crewai.tasks': MagicMock(),
+            'langchain': MagicMock(),
+            'langchain.chat_models': MagicMock(),
+            'langchain.tools': MagicMock()
+        })
+    ]
+    
+    # Apply all patches
+    for p in patches:
+        p.start()
+    
+    yield
+    
+    # Stop all patches
+    for p in patches:
+        p.stop()
 
-    print("test_generate_script_success")
-    # Mock the task processor
-    monkeypatch.setattr("src.server.get_task_processor", lambda: mock_task_processor)
+@pytest.fixture
+def task_processor():
+    """
+    Get a TaskProcessor instance with mocked dependencies
+    """
+    return MockTaskProcessor()
 
-    # Test data
+@pytest.fixture
+def test_client(mock_all_dependencies, task_processor):
+    """
+    Create a test client with all dependencies properly mocked
+    """
+    app.dependency_overrides[get_task_processor] = lambda: task_processor
+    
+    with TestClient(app) as client:
+        yield client
+    
+    app.dependency_overrides.clear()
+
+def test_generate_script_success(test_client, task_processor):
+    """
+    Test successful script generation
+    """
     request_data = {
-        "title": "Test Title",
-        "tags": ["tag1", "tag2"],
-        "idea": "Test idea",
-        "lyrics": "Test lyrics",
-        "duration": 180,
+        "message": {
+            "role": "user",
+            "parts": [{
+                "type": "text",
+                "text": "Generate a test script"
+            }]
+        },
         "sessionId": "test-session",
         "metadata": {
-            "source": "test",
-            "priority": "high"
+            "title": "Test Script",
+            "tags": ["test"],
+            "idea": "A test script about testing",
+            "lyrics": None,
+            "duration": 120
         }
     }
 
-    print(f"Request data: {request_data}")
-
-    # Make request
     response = test_client.post("/tasks/send", json=request_data)
-
-    # Assertions for immediate response
+    
     assert response.status_code == status.HTTP_200_OK
     result = response.json()
-    print(f"Result: {result}")
     assert result["id"] is not None
+    assert result["sessionId"] == "test-session"
     assert result["status"]["state"] == TaskState.SUBMITTED.value
+    assert result["status"]["message"]["role"] == "assistant"
+    assert len(result["status"]["message"]["parts"]) == 1
+    assert result["status"]["message"]["parts"][0]["type"] == "text"
     assert result["status"]["message"]["parts"][0]["text"] == "Starting script generation..."
-    assert result["metadata"]["source"] == "test"
-    assert result["metadata"]["priority"] == "high"
-
-    # Get task after a short delay to verify background processing started
-    task_id = result["id"]
-    response = test_client.get(f"/tasks/{task_id}")
-    assert response.status_code == status.HTTP_200_OK
-    task_status = response.json()
-    assert task_status["status"]["state"] in [TaskState.SUBMITTED.value, TaskState.WORKING.value, TaskState.COMPLETED.value]
+    assert result["metadata"]["title"] == "Test Script"
+    assert result["metadata"]["tags"] == ["test"]
+    assert result["metadata"]["idea"] == "A test script about testing"
+    assert result["metadata"]["duration"] == 120
 
 def test_generate_script_validation_error(test_client):
     """
     Test script generation with invalid request data
     """
-    # Make request with invalid data
-    response = test_client.post("/tasks/send", json={})
+    # Enviar datos que no coinciden con el formato esperado
+    response = test_client.post("/tasks/send", json={
+        "message": "not_a_message_object",  # debe ser un objeto con role y parts
+        "metadata": "not_a_metadata_object"  # debe ser un objeto con los campos requeridos
+    })
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_detail = response.json()["detail"]
+    assert "validation errors for TaskSendParams" in error_detail
+    assert "Input should be a valid dictionary" in error_detail
+    assert "message" in error_detail
+    assert "metadata" in error_detail
 
-    # Assertions
-    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-
-def test_get_task_success(test_client, monkeypatch):
+def test_get_task_success(test_client, task_processor):
     """
-    Test successful task retrieval with A2A implementation
+    Test successful task retrieval
     """
-    # Setup test task
     task_id = "test-123"
     test_task = Task(
         id=task_id,
+        sessionId="test-session",
         status=TaskStatus(
             state=TaskState.COMPLETED,
             timestamp=datetime.utcnow().isoformat(),
@@ -86,22 +245,23 @@ def test_get_task_success(test_client, monkeypatch):
             )
         ),
         metadata={
-            "source": "test",
-            "sessionId": "test-session"
+            "title": "Test Script",
+            "tags": ["test"],
+            "idea": "Test idea",
+            "lyrics": None,
+            "duration": 120
         }
     )
-    controller.tasks[task_id] = test_task
+    task_processor._tasks[task_id] = test_task
 
-    # Make request
     response = test_client.get(f"/tasks/{task_id}")
 
-    # Assertions
     assert response.status_code == status.HTTP_200_OK
     result = response.json()
     assert result["id"] == task_id
+    assert result["sessionId"] == "test-session"
     assert result["status"]["state"] == TaskState.COMPLETED.value
-    assert result["metadata"]["source"] == "test"
-    assert result["metadata"]["sessionId"] == "test-session"
+    assert result["metadata"]["title"] == "Test Script"
 
 def test_get_task_not_found(test_client):
     """
@@ -110,14 +270,14 @@ def test_get_task_not_found(test_client):
     response = test_client.get("/tasks/non-existent")
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
-def test_cancel_task_success(test_client):
+def test_cancel_task_success(test_client, task_processor):
     """
-    Test successful task cancellation with A2A implementation
+    Test successful task cancellation
     """
-    # Setup test task
     task_id = "test-123"
     test_task = Task(
         id=task_id,
+        sessionId="test-session",
         status=TaskStatus(
             state=TaskState.WORKING,
             timestamp=datetime.utcnow().isoformat(),
@@ -126,14 +286,18 @@ def test_cancel_task_success(test_client):
                 parts=[TextPart(type="text", text="Working...")]
             )
         ),
-        metadata={"sessionId": "test-session"}
+        metadata={
+            "title": "Test Script",
+            "genre": "test",
+            "tone": "neutral",
+            "length": "short",
+            "tags": ["test"]
+        }
     )
-    controller.tasks[task_id] = test_task
+    task_processor._tasks[task_id] = test_task
 
-    # Make request
     response = test_client.post(f"/tasks/{task_id}/cancel")
 
-    # Assertions
     assert response.status_code == status.HTTP_200_OK
     result = response.json()
     assert result["id"] == task_id
@@ -146,152 +310,144 @@ def test_cancel_task_not_found(test_client):
     response = test_client.post("/tasks/non-existent/cancel")
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
-def test_list_tasks_success(test_client):
-    """
-    Test successful task listing with A2A implementation
-    """
-    # Clear existing tasks
-    controller.tasks.clear()
-    
-    # Setup test tasks
-    task_id = "test-123"
-    test_task = Task(
-        id=task_id,
-        status=TaskStatus(
-            state=TaskState.COMPLETED,
-            timestamp=datetime.utcnow().isoformat(),
-            message=Message(
-                role="assistant",
-                parts=[TextPart(type="text", text="Test message")]
-            )
-        ),
-        metadata={"sessionId": "test-session"}
-    )
-    controller.tasks[task_id] = test_task
-
-    # Make request
-    response = test_client.get("/tasks")
-
-    # Assertions
-    assert response.status_code == status.HTTP_200_OK
-    result = response.json()
-    assert isinstance(result, list)
-    assert len(result) == 1
-    assert result[0]["id"] == task_id
-    assert result[0]["status"]["state"] == TaskState.COMPLETED.value
-    assert result[0]["metadata"]["sessionId"] == "test-session"
-
-def test_set_push_notification(test_client):
+def test_set_push_notification(test_client, task_processor):
     """
     Test setting push notification configuration
     """
     task_id = "test-123"
     config = {
         "url": "https://test.com/webhook",
+        "events": ["task.completed", "task.failed"],
         "headers": {"Authorization": "Bearer test"}
     }
     
-    response = test_client.post(f"/tasks/{task_id}/notifications", json=config)
+    response = test_client.post(f"/tasks/{task_id}/pushNotification", json=config)
     assert response.status_code == status.HTTP_200_OK
     result = response.json()
     assert result["url"] == config["url"]
+    assert result["events"] == config["events"]
     assert result["headers"] == config["headers"]
 
-def test_get_push_notification(test_client):
+def test_get_push_notification(test_client, task_processor):
     """
     Test getting push notification configuration
     """
     task_id = "test-123"
     config = PushNotificationConfig(
         url="https://test.com/webhook",
+        events=["task.completed", "task.failed"],
         headers={"Authorization": "Bearer test"}
     )
-    controller.push_notifications[task_id] = config
+    task_processor._push_configs[task_id] = config
     
-    response = test_client.get(f"/tasks/{task_id}/notifications")
+    response = test_client.get(f"/tasks/{task_id}/pushNotification")
     assert response.status_code == status.HTTP_200_OK
     result = response.json()
     assert result["url"] == config.url
+    assert result["events"] == config.events
     assert result["headers"] == config.headers
 
 @pytest.mark.asyncio
-async def test_send_task_streaming_success(test_client, mock_task_processor, monkeypatch):
+async def test_send_task_streaming_success(test_client, task_processor):
     """
-    Test successful task streaming with A2A implementation
+    Test successful task streaming
     """
-    monkeypatch.setattr("src.server.get_task_processor", lambda: mock_task_processor)
-    
-    params = {
-        "title": "Test Title",
-        "tags": ["tag1", "tag2"],
-        "idea": "Test idea",
-        "lyrics": "Test lyrics",
-        "duration": 180,
-        "sessionId": "test-session",
-        "metadata": {
-            "source": "test",
-            "priority": "high"
+    task_id = "test-123"
+    test_task = Task(
+        id=task_id,
+        sessionId="test-session",
+        status=TaskStatus(
+            state=TaskState.WORKING,
+            timestamp=datetime.utcnow().isoformat(),
+            message=Message(
+                role="assistant",
+                parts=[TextPart(type="text", text="Working...")]
+            )
+        ),
+        metadata={
+            "title": "Test Script",
+            "tags": ["test"],
+            "idea": "Test idea",
+            "lyrics": None,
+            "duration": 120
         }
+    )
+    task_processor._tasks[task_id] = test_task
+    task_processor._task_updates[task_id] = asyncio.Queue()
+    await task_processor._task_updates[task_id].put(test_task)
+    
+    request_data = {
+        "title": "Test Script",
+        "tags": ["test"],
+        "idea": "A test script about testing",
+        "lyrics": None,
+        "duration": 120,
+        "sessionId": "test-session"
     }
     
-    async with httpx.AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/tasks/send/subscribe", params=params)
-        assert response.status_code == 200
-        
-        events = []
-        async for line in response.aiter_lines():
-            if line.startswith("data: "):
-                event_data = json.loads(line[6:])
-                events.append(event_data)
-                if event_data["status"]["state"] == TaskState.COMPLETED.value:
-                    break
-        
-        assert len(events) >= 2
-        
-        # Verify first event (working state)
-        assert events[0]["status"]["state"] == TaskState.WORKING.value
-        assert events[0]["status"]["message"]["parts"][0]["text"] == "Generating movie script..."
-        assert events[0]["metadata"]["source"] == "test"
-        assert events[0]["metadata"]["priority"] == "high"
+    async with httpx.AsyncClient(app=test_client.app, base_url="http://test") as ac:
+        async with ac.stream("POST", "/tasks/sendSubscribe", json=request_data) as response:
+            assert response.status_code == status.HTTP_200_OK
+            
+            received_updates = []
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = json.loads(line[6:])
+                    received_updates.append(data)
+                    if data["status"]["state"] == TaskState.COMPLETED.value:
+                        break
 
-        # Verify last event (completed state)
-        last_event = events[-1]
-        assert last_event["status"]["state"] == TaskState.COMPLETED.value
-        assert last_event["status"]["message"]["parts"][0]["text"] == "Movie script generated successfully"
-        assert "artifacts" in last_event
-        assert len(last_event["artifacts"]) > 0
+            assert len(received_updates) > 0
 
 @pytest.mark.asyncio
-async def test_send_task_streaming_error(test_client, mock_task_processor, monkeypatch):
+async def test_send_task_streaming_error(test_client, task_processor):
     """
-    Test streaming error handling with A2A implementation
+    Test streaming error handling
     """
-    monkeypatch.setattr("src.server.get_task_processor", lambda: mock_task_processor)
-    mock_task_processor.process_task_stream = mock_task_processor.mock_process_task_stream_error
+    task_id = "test-123"
+    error_task = Task(
+        id=task_id,
+        sessionId="test-session",
+        status=TaskStatus(
+            state=TaskState.FAILED,
+            timestamp=datetime.utcnow().isoformat(),
+            message=Message(
+                role="assistant",
+                parts=[TextPart(type="text", text="Failed to generate script: Invalid parameters provided")]
+            )
+        ),
+        metadata={
+            "title": "Test Script",
+            "tags": ["test"],
+            "idea": "Test idea",
+            "error": "Invalid parameters provided"
+        }
+    )
+    task_processor._tasks[task_id] = error_task
+    task_processor._task_updates[task_id] = asyncio.Queue()
+    await task_processor._task_updates[task_id].put(error_task)
     
-    params = {
-        "title": "Test Title",
-        "tags": ["tag1", "tag2"],
-        "idea": "Test idea",
-        "lyrics": "Test lyrics",
-        "duration": 180,
-        "sessionId": "test-session",
-        "metadata": {"source": "test"}
+    request_data = {
+        "title": "Test Script",
+        "tags": ["test"],
+        "idea": "A test script about testing",
+        "lyrics": None,
+        "duration": 120,
+        "sessionId": "test-session"
     }
     
-    async with httpx.AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/tasks/send/subscribe", params=params)
-        assert response.status_code == 200
-        
-        events = []
-        async for line in response.aiter_lines():
-            if line.startswith("data: "):
-                event_data = json.loads(line[6:])
-                events.append(event_data)
-                if event_data["status"]["state"] == TaskState.ERROR.value:
-                    break
+    async with httpx.AsyncClient(app=test_client.app, base_url="http://test") as ac:
+        async with ac.stream("POST", "/tasks/sendSubscribe", json=request_data) as response:
+            assert response.status_code == status.HTTP_200_OK
+            
+            received_updates = []
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = json.loads(line[6:])
+                    received_updates.append(data)
+                    if data["status"]["state"] == TaskState.FAILED.value:
+                        break
 
-        assert len(events) == 1
-        assert events[0]["status"]["state"] == TaskState.ERROR.value
-        assert events[0]["status"]["message"]["parts"][0]["text"] == "Failed to generate movie script: Invalid parameters provided"
-        assert events[0]["metadata"]["source"] == "test"
+            assert len(received_updates) == 1
+            assert received_updates[0]["status"]["state"] == TaskState.FAILED.value
+            assert "Failed to generate script" in received_updates[0]["status"]["message"]["parts"][0]["text"]

@@ -4,6 +4,7 @@ Integration tests for the API using a real server instance.
 import pytest
 from fastapi.testclient import TestClient
 import asyncio
+import time
 from datetime import datetime
 from src.api.app import app
 from src.models.task import TaskState
@@ -17,7 +18,8 @@ def test_client():
     """
     return TestClient(app)
 
-def test_real_script_generation(test_client):
+@pytest.mark.asyncio
+async def test_real_script_generation(test_client):
     """
     Test real script generation without mocks.
     Verifies that the endpoint returns immediately with SUBMITTED state
@@ -68,7 +70,7 @@ def test_real_script_generation(test_client):
             
         # Wait before next poll
         current_try += 1
-        asyncio.sleep(20)
+        await asyncio.sleep(1)  # Reduced sleep time for tests
     
     # Verify final state
     assert final_state is not None, "Task did not reach terminal state within timeout"
@@ -80,9 +82,20 @@ def test_real_script_generation(test_client):
     
     assert "artifacts" in task_result
     assert len(task_result["artifacts"]) > 0
-    assert "script" in task_result["artifacts"][0]
-    assert "scenes" in task_result["artifacts"][0]
-    assert "metadata" in task_result["artifacts"][0]
+    
+    # Find and verify script artifact
+    script_artifact = next((a for a in task_result["artifacts"] if "script" in a), None)
+    assert script_artifact is not None
+    assert isinstance(script_artifact["script"], str)
+    assert isinstance(script_artifact["scenes"], list)
+    assert isinstance(script_artifact["metadata"], dict)
+    
+    # Find and verify outline artifact
+    outline_artifact = next((a for a in task_result["artifacts"] if "outline" in a), None)
+    assert outline_artifact is not None
+    assert isinstance(outline_artifact["outline"], str)
+    assert isinstance(outline_artifact["scenes"], list)
+    assert isinstance(outline_artifact["metadata"], dict)
 
 def test_real_task_cancellation(test_client):
     """
@@ -106,7 +119,7 @@ def test_real_task_cancellation(test_client):
     task_id = response.json()["id"]
     
     # Wait briefly to ensure task processing has started
-    asyncio.sleep(0.5)
+    time.sleep(0.5)
     
     # Cancel task
     response = test_client.post(f"/tasks/{task_id}/cancel")
