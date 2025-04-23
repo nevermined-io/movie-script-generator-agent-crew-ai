@@ -13,6 +13,7 @@ import asyncio
 from .core.task_processor import TaskProcessor
 from .models.task import Task, TaskStatus, Message, TaskState
 from .models.a2a import TaskSendParams, PushNotificationConfig
+from .models.agent_card import AGENT_CARD
 
 # Create FastAPI app
 app = FastAPI(title="Movie Script Generator A2A Agent")
@@ -32,11 +33,7 @@ async def get_agent_card():
     """
     Get the agent card with capabilities and metadata
     """
-    try:
-        with open("api/.well-known/agent.json") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Agent card not found")
+    return AGENT_CARD.dict()
 
 def get_task_processor() -> TaskProcessor:
     """
@@ -170,4 +167,4 @@ async def get_push_notification(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=3000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
