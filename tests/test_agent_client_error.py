@@ -81,7 +81,7 @@ class AgentClient:
         if not self.session:
             raise Exception("Session not initialized. Use async with.")
             
-        async with self.session.get(f"{self.base_url}/agent-card") as response:
+        async with self.session.get(f"{self.base_url}/.well-known/agent.json") as response:
             if response.status != 200:
                 raise Exception(f"Failed to get agent card: {response.status}")
             return await response.json()

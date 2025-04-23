@@ -11,11 +11,13 @@ This script will:
 import asyncio
 import aiohttp
 import json
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import logging
 import os
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
+import pytest
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -105,8 +107,9 @@ class AgentClient:
         self.base_url = base_url
         self.max_retries = max_retries
         self.retry_delay = retry_delay
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session = None
         self.interpreter = AgentCardInterpreter(openai_api_key)
+        self.task_history = {}
         
     async def __aenter__(self):
         """Initialize aiohttp session"""
@@ -128,7 +131,7 @@ class AgentClient:
         if not self.session:
             raise Exception("Session not initialized. Use async with.")
             
-        async with self.session.get(f"{self.base_url}/agent-card") as response:
+        async with self.session.get(f"{self.base_url}/.well-known/agent.json") as response:
             if response.status != 200:
                 raise Exception(f"Failed to get agent card: {response.status}")
             return await response.json()
@@ -170,6 +173,48 @@ class AgentClient:
                 raise Exception(f"Failed to check task status: {response.status}")
             return await response.json()
             
+    async def get_task_history(self, task_id: str) -> List[Dict[str, Any]]:
+        """
+        Get the complete history of a task including all state transitions and messages
+        
+        @param task_id: ID of the task to get history for
+        @returns: List of historical states and messages
+        @raises: Exception if request fails
+        """
+        if not self.session:
+            raise Exception("Session not initialized.")
+            
+        async with self.session.get(
+            f"{self.base_url}/tasks/{task_id}/history"
+        ) as response:
+            if response.status != 200:
+                raise Exception(f"Task {task_id} not found")
+            return await response.json()
+            
+    async def _update_task_history(self, task_id: str, status_update: Dict[str, Any]):
+        """
+        Update internal task history with new status
+        
+        @param task_id: ID of the task
+        @param status_update: New status update to add to history
+        """
+        if task_id not in self.task_history:
+            self.task_history[task_id] = []
+            
+        # Validate state transition if present
+        if "state" in status_update:
+            new_state = status_update["state"]
+            current_state = self.task_history[task_id][-1]["state"] if self.task_history[task_id] else None
+            
+            if current_state == "completed":
+                raise Exception("Invalid state transition: Cannot update completed task")
+                
+        # Add timestamp if not present
+        if "timestamp" not in status_update:
+            status_update["timestamp"] = datetime.utcnow().isoformat()
+            
+        self.task_history[task_id].append(status_update)
+    
     async def wait_for_completion(self, task_id: str) -> Dict[str, Any]:
         """
         Wait for task completion with retries
@@ -181,6 +226,9 @@ class AgentClient:
         for attempt in range(self.max_retries):
             task_status = await self.check_task_status(task_id)
             state = task_status["status"]["state"]
+            
+            # Update task history
+            await self._update_task_history(task_id, task_status["status"])
             
             if state == "completed":
                 logger.info("Task completed successfully")
@@ -202,10 +250,11 @@ async def main():
     """
     # Define our specific goal with detailed requirements
     goal = """
-    Create a technical script for a 60-second music video with these specific requirements:
+    Create a technical script for a 20-second music video with these specific requirements:
     
     Song Details:
-    - Duration: 60 seconds
+    - Duration: 20 seconds
+    - Number of scenes: 3
     - Electronic dance music (EDM) style
     - Focus on the build-up and drop sequence
     - Instrumental focus with minimal vocals
@@ -226,8 +275,6 @@ async def main():
     Mood and Narrative:
     - Start with calm, establishing city shots
     - Gradual build-up of visual intensity
-    - Peak energy during the drop (30-45 second mark)
-    - Elegant wind-down for the final 15 seconds
     """
     
     try:
@@ -260,5 +307,124 @@ async def main():
         logger.error(f"Error: {str(e)}")
         raise
 
+async def test_task_history_tracking():
+    """
+    Test that task history follows A2A protocol state transitions and structure
+    """
+    async with AgentClient() as client:
+        # Get agent card first
+        agent_card = await client.get_agent_card()
+        
+        # Create and send a task
+        task_data = await client.interpreter.create_task_data(
+            agent_card,
+            "Write a short comedy script about a misunderstanding at a coffee shop"
+        )
+        task_response = await client.send_task(task_data)
+        task_id = task_response["id"]
+        
+        try:
+            # Wait for completion while tracking history
+            result = await client.wait_for_completion(task_id)
+            
+            # Verify internal history tracking
+            assert task_id in client.task_history, "Task ID should be present in history"
+            history = client.task_history[task_id]
+            assert len(history) > 0, "History should contain entries"
+            
+            # Verify A2A protocol state transitions
+            states = [entry["state"] for entry in history]
+            valid_states = {"submitted", "working", "input-required", "completed", "failed", "cancelled"}
+            assert all(state in valid_states for state in states), \
+                f"All states should be valid A2A states: {valid_states}"
+            
+            # Verify history entry structure according to A2A
+            for entry in history:
+                # Required fields
+                assert "timestamp" in entry, "Each entry should have a timestamp"
+                assert "state" in entry, "Each entry should have a state"
+                assert isinstance(entry["timestamp"], str), "Timestamp should be ISO format string"
+                assert entry["state"] in valid_states, f"State should be one of: {valid_states}"
+                
+                # Optional message field - verify A2A format if present
+                if "message" in entry:
+                    message = entry["message"]
+                    assert isinstance(message, dict), "Message should be a dictionary"
+                    assert "parts" in message, "Message should have parts array"
+                    assert isinstance(message["parts"], list), "Message parts should be a list"
+                    for part in message["parts"]:
+                        assert isinstance(part, dict), "Each part should be a dictionary"
+                        if "text" in part:
+                            assert isinstance(part["text"], str), "Text in part should be a string"
+            
+            # Verify final state is terminal
+            final_state = history[-1]["state"]
+            assert final_state in {"completed", "failed", "cancelled"}, \
+                "Task should end in a terminal state"
+            
+            # Verify state transitions are logical
+            for i in range(1, len(states)):
+                prev_state = states[i-1]
+                curr_state = states[i]
+                
+                # Can't go back to submitted after starting
+                if prev_state != "submitted":
+                    assert curr_state != "submitted", \
+                        "Task can't return to submitted state"
+                
+                # Can't go back to working after completion
+                if prev_state in {"completed", "failed", "cancelled"}:
+                    assert curr_state in {"completed", "failed", "cancelled"}, \
+                        "Task can't return to working after terminal state"
+            
+        except Exception as e:
+            logger.error(f"Task failed: {str(e)}")
+            raise
+
+async def test_history_error_handling():
+    """
+    Test error handling for history-related operations according to A2A protocol
+    """
+    # Test uninitialized session
+    client = AgentClient(base_url="http://invalid-url")
+    with pytest.raises(Exception) as exc_info:
+        await client.get_task_history("invalid-task-id")
+    assert "Session not initialized" in str(exc_info.value)
+    
+    # Test non-existent task ID
+    async with AgentClient() as client:
+        task_id = "non-existent-task"
+        with pytest.raises(Exception) as exc_info:
+            await client.get_task_history(task_id)
+        assert f"Task {task_id} not found" in str(exc_info.value)
+        
+    # Test invalid state transitions
+    async with AgentClient() as client:
+        task_id = "test-task"
+        # Start with completed state
+        await client._update_task_history(task_id, {
+            "state": "completed",
+            "message": {
+                "parts": [{"text": "Task completed"}]
+            }
+        })
+        
+        # Try to transition to working (should fail)
+        with pytest.raises(Exception) as exc_info:
+            await client._update_task_history(task_id, {
+                "state": "working",
+                "message": {
+                    "parts": [{"text": "Cannot work on completed task"}]
+                }
+            })
+        assert "Invalid state transition" in str(exc_info.value)
+
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    load_dotenv()
+    
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # Run tests
+    asyncio.run(test_task_history_tracking())
+    asyncio.run(test_history_error_handling()) 

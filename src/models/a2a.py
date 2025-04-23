@@ -1,8 +1,8 @@
 """
 A2A Protocol data models
 """
-from typing import Dict, Any, Optional, List, Union
-from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List, Union, Set
+from pydantic import BaseModel, Field, validator
 import uuid
 from datetime import datetime
 from src.models.task import TaskState, TaskStatus, Message, Artifact, TextPart
@@ -65,6 +65,25 @@ class TaskSendParams(BaseModel):
     message: Dict[str, Any]
     sessionId: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    acceptedOutputModes: Optional[List[str]] = Field(
+        default=["text"],
+        description="List of output modes the client can handle"
+    )
+
+    @validator("acceptedOutputModes")
+    def validate_output_modes(cls, v: Optional[List[str]]) -> List[str]:
+        """Validate that output modes are supported"""
+        if not v:
+            return ["text"]
+            
+        valid_modes = {"text", "markdown", "html", "json"}
+        invalid_modes = set(v) - valid_modes
+        if invalid_modes:
+            raise ValueError(
+                f"Unsupported output modes: {invalid_modes}. "
+                f"Supported modes are: {valid_modes}"
+            )
+        return v
 
 class PushNotificationConfig(BaseModel):
     """
@@ -73,6 +92,8 @@ class PushNotificationConfig(BaseModel):
     url: str
     events: List[str]
     headers: Optional[Dict[str, str]] = None
+    token: Optional[str] = None
+    authentication: Optional[Dict[str, Any]] = None
 
 class ArtifactPart(BaseModel):
     """

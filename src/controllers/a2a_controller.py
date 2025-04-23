@@ -6,7 +6,7 @@ from typing import Dict, Optional, List, Any
 from uuid import uuid4
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -45,58 +45,7 @@ class A2AController:
             self.tasks: Dict[str, Task] = {}
             self.push_configs: Dict[str, PushNotificationConfig] = {}
             self.generator = MovieScriptGenerator()
-            self.router = APIRouter()
-            self._setup_routes()
             self._initialized = True
-    
-    def _setup_routes(self):
-        """Setup FastAPI routes."""
-        self.router.add_api_route(
-            "/agent-card",
-            self.get_agent_card,
-            methods=["GET"]
-        )
-        self.router.add_api_route(
-            "/tasks/send",
-            self.send_task,
-            methods=["POST"],
-            response_model=Task
-        )
-        self.router.add_api_route(
-            "/tasks/sendSubscribe",
-            self.send_task_streaming,
-            methods=["POST"]
-        )
-        self.router.add_api_route(
-            "/tasks/{task_id}",
-            self.get_task,
-            methods=["GET"],
-            response_model=Task
-        )
-        self.router.add_api_route(
-            "/tasks/{task_id}/cancel",
-            self.cancel_task,
-            methods=["POST"],
-            response_model=Task
-        )
-        self.router.add_api_route(
-            "/tasks",
-            self.list_tasks,
-            methods=["GET"],
-            response_model=List[Task]
-        )
-        self.router.add_api_route(
-            "/tasks/{task_id}/pushNotification",
-            self.set_push_notification,
-            methods=["POST"],
-            response_model=PushNotificationConfig
-        )
-        self.router.add_api_route(
-            "/tasks/{task_id}/pushNotification",
-            self.get_push_notification,
-            methods=["GET"],
-            response_model=PushNotificationConfig
-        )
     
     async def get_agent_card(self):
         """Return the agent card describing this agent's capabilities."""
@@ -187,22 +136,8 @@ class A2AController:
                     
                 # Create extracted scenes
                 extracted_scenes = [
-                    ExtractedScene(
-                        sceneNumber=i + 1,
-                        startTime="00:00",  # These should be calculated based on duration
-                        endTime="00:00",    # These should be calculated based on duration
-                        shotType=scene.get("shot_type", ""),
-                        cameraMovement=scene.get("camera_movement", ""),
-                        cameraEquipment=scene.get("camera_equipment", ""),
-                        location=scene.get("location", ""),
-                        lightingSetup=scene.get("lighting_setup", {}),
-                        colorPalette=scene.get("color_palette", []),
-                        visualReferences=scene.get("visual_references", []),
-                        characterActions=scene.get("character_actions", {}),
-                        transitionType=scene.get("transition_type", ""),
-                        specialNotes=scene.get("special_notes", [])
-                    )
-                    for i, scene in enumerate(result["scenes"])
+                    ExtractedScene(**scene)
+                    for scene in result["scenes"]
                 ]
 
                 # Create transformed scenes
@@ -411,5 +346,4 @@ def process_scene(scene_data: Dict[str, Any]) -> ExtractedScene:
     )
 
 # Create singleton instance
-controller = A2AController()
-router = controller.router 
+controller = A2AController() 

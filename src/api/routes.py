@@ -5,18 +5,17 @@ from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from src.core.generator import MovieScriptGenerator
 from src.api.models import ScriptRequest, ScriptResponse
-from src.models.a2a import Task, TaskState
-from src.models.agent_card import AGENT_CARD
-from src.controllers.a2a_controller import controller, TaskRequest  # Import TaskRequest along with controller
+from src.models.a2a import Task, PushNotificationConfig
+from src.controllers.a2a_controller import controller, TaskRequest
 from src.utils.logger import logger
 
-# Create router and use the controller's router
-router = controller.router
+# Create router
+router = APIRouter()
 
 # Initialize generator
 generator = MovieScriptGenerator()
 
-@router.get("/agent-card")
+@router.get("/.well-known/agent.json")
 async def get_agent_card():
     """
     Get the agent card describing this agent's capabilities.
@@ -40,24 +39,15 @@ async def create_task(input_data: TaskRequest):
     )
     return await controller.send_task(input_data)
 
-@router.get("/tasks", response_model=List[Task])
-async def list_tasks(session_id: Optional[str] = None, state: Optional[str] = None):
+@router.post("/tasks/sendSubscribe")
+async def send_task_streaming(request: TaskRequest):
     """
-    List all tasks, optionally filtered by session ID and state.
+    Create and process a new task with streaming updates.
     
-    @param {string} session_id Optional session ID to filter by
-    @param {string} state Optional task state to filter by
-    @returns {Task[]} List of matching tasks
+    @param {TaskRequest} request The task request data
+    @returns {StreamingResponse} Stream of task updates
     """
-    logger.log_script_generation(
-        task_id="api",
-        status="tasks_listed",
-        metadata={
-            "session_id": session_id,
-            "state": state
-        }
-    )
-    return await controller.list_tasks(session_id=session_id, state=state)
+    return await controller.send_task_streaming(request)
 
 @router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str):
@@ -91,6 +81,48 @@ async def cancel_task(task_id: str):
         metadata={}
     )
     return await controller.cancel_task(task_id)
+
+@router.get("/tasks", response_model=List[Task])
+async def list_tasks(session_id: Optional[str] = None, state: Optional[str] = None):
+    """
+    List all tasks, optionally filtered by session ID and state.
+    
+    @param {string} session_id Optional session ID to filter by
+    @param {string} state Optional task state to filter by
+    @returns {Task[]} List of matching tasks
+    """
+    logger.log_script_generation(
+        task_id="api",
+        status="tasks_listed",
+        metadata={
+            "session_id": session_id,
+            "state": state
+        }
+    )
+    return await controller.list_tasks(session_id=session_id, state=state)
+
+@router.post("/tasks/{task_id}/pushNotification", response_model=PushNotificationConfig)
+async def set_push_notification(task_id: str, config: PushNotificationConfig):
+    """
+    Set push notification configuration for a task.
+    
+    @param {string} task_id The task ID
+    @param {PushNotificationConfig} config The notification configuration
+    @returns {PushNotificationConfig} The saved configuration
+    @throws {404} If task not found
+    """
+    return await controller.set_push_notification(task_id, config)
+
+@router.get("/tasks/{task_id}/pushNotification", response_model=PushNotificationConfig)
+async def get_push_notification(task_id: str):
+    """
+    Get push notification configuration for a task.
+    
+    @param {string} task_id The task ID
+    @returns {PushNotificationConfig} The notification configuration
+    @throws {404} If task or config not found
+    """
+    return await controller.get_push_notification(task_id)
 
 @router.post("/generate-script", response_model=ScriptResponse, deprecated=True)
 async def generate_script(request: ScriptRequest) -> Dict[str, Any]:
