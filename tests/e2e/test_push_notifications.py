@@ -14,6 +14,7 @@ import subprocess
 import time
 import os
 import signal
+import aiohttp
 
 from src.client import AgentClient
 
@@ -50,14 +51,13 @@ class NotificationCollector:
     
     @param max_notifications: Maximum number of notifications to collect before stopping
     @param timeout: Maximum time to wait for notifications in seconds
-    @param max_attempts: Maximum number of status check attempts
     """
-    def __init__(self, max_notifications: int = 10, timeout: float = 60.0, max_attempts: int = 30):
+    def __init__(self, max_notifications: int = 10, timeout: float = 60.0):
         self.status_updates: List[Dict[str, Any]] = []
         self.artifact_updates: List[Dict[str, Any]] = []
         self.max_notifications = max_notifications
         self.timeout = timeout
-        self.max_attempts = max_attempts
+        self.done = asyncio.Event()
         
     def add_status_update(self, update: Dict[str, Any]):
         """
@@ -66,6 +66,8 @@ class NotificationCollector:
         @param update: Status update data
         """
         self.status_updates.append(update)
+        if update.get("state") in {"completed", "failed", "cancelled"}:
+            self.done.set()
         
     def add_artifact_update(self, update: Dict[str, Any]):
         """
@@ -119,9 +121,9 @@ class NotificationCollector:
 @pytest.mark.asyncio
 async def test_push_notifications_streaming(server_process):
     """
-    Test streaming push notifications during task execution
+    Test streaming push notifications during task execution using SSE
     """
-    collector = NotificationCollector(timeout=60.0, max_attempts=30)
+    collector = NotificationCollector(timeout=60.0)
     
     async with AgentClient() as client:
         # Get agent card
@@ -133,39 +135,47 @@ async def test_push_notifications_streaming(server_process):
             "Generate a short story about an AI learning to paint"
         )
         
-        # Send task and collect notifications
-        task_response = await client.send_task(task_data)
-        task_id = task_response["id"]
-        
-        attempts = 0
-        try:
-            while collector.total_notifications < collector.max_notifications and attempts < collector.max_attempts:
-                attempts += 1
-                status = await client.check_task_status(task_id)
+        # Subscribe to SSE updates
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{client.base_url}/tasks/sendSubscribe",
+                json=task_data
+            ) as response:
+                if response.status != 200:
+                    raise Exception(f"Failed to subscribe to updates: {response.status}")
                 
-                # Process status update
-                if "status" in status:
-                    collector.add_status_update(status["status"])
-                    logger.info(f"Status update received: {status['status']}")
-                    if status["status"]["state"] in {"completed", "failed", "cancelled"}:
-                        # For completed tasks, we expect artifacts
-                        if status["status"]["state"] == "completed" and "artifacts" in status:
-                            logger.info(f"Processing artifacts for completed task: {len(status['artifacts'])}")
-                            for artifact in status["artifacts"]:
-                                collector.add_artifact_update(artifact)
-                        break
-                        
-                # Process artifact updates during task execution
-                if "artifacts" in status and status["artifacts"]:
-                    logger.info(f"Processing artifacts during execution: {len(status['artifacts'])}")
-                    for artifact in status["artifacts"]:
-                        collector.add_artifact_update(artifact)
-                        
-                await asyncio.sleep(2)  # Increased polling delay
-                
-        except asyncio.TimeoutError:
-            logger.warning("Notification collection timed out")
-            
+                try:
+                    async for event in response.content:
+                        if event:
+                            event_data = event.decode()
+                            # Skip heartbeats and empty lines
+                            if not event_data.strip() or event_data == "data: ":
+                                continue
+                                
+                            # Ensure it's a data event and extract the JSON
+                            if event_data.startswith("data: "):
+                                try:
+                                    data = json.loads(event_data.replace("data: ", "", 1))
+                                    logger.info(f"SSE update received: {data}")
+                                    
+                                    if "status" in data:
+                                        collector.add_status_update(data["status"])
+                                        
+                                    if "artifacts" in data and data["artifacts"]:
+                                        for artifact in data["artifacts"]:
+                                            collector.add_artifact_update(artifact)
+                                            
+                                    # Check if we're done
+                                    if collector.done.is_set():
+                                        break
+                                        
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Error decoding JSON from SSE event: {e}")
+                                    logger.debug(f"Raw event data: {event_data}")
+                                    continue
+                except asyncio.TimeoutError:
+                    logger.warning("SSE connection timed out")
+                    
         # Verify notifications
         assert collector.total_notifications > 0, "No notifications received"
         assert collector.verify_status_sequence(), "Invalid status transition sequence"
@@ -173,7 +183,7 @@ async def test_push_notifications_streaming(server_process):
         # Verify final state
         final_status = collector.status_updates[-1]
         assert final_status["state"] in {"completed", "failed", "cancelled"}, \
-            f"Task did not reach terminal state after {attempts} attempts. Final state: {final_status['state']}"
+            f"Task did not reach terminal state. Final state: {final_status['state']}"
 
 @pytest.mark.asyncio
 async def test_push_notifications_error_handling():
@@ -203,6 +213,7 @@ async def test_push_notifications_cancellation():
     Test cancellation handling in push notifications
     """
     collector = NotificationCollector()
+    task_id = None
     
     async with AgentClient() as client:
         # Get agent card
@@ -214,33 +225,80 @@ async def test_push_notifications_cancellation():
             "Write a detailed analysis of War and Peace"
         )
         
-        # Send task
-        task_response = await client.send_task(task_data)
-        task_id = task_response["id"]
-        
-        # Let it run briefly to ensure it's in working state
-        await asyncio.sleep(2)
-        
-        # Get initial status
-        initial_status = await client.check_task_status(task_id)
-        collector.add_status_update(initial_status["status"])
-        
-        # Cancel the task
-        try:
-            cancel_response = await client.cancel_task(task_id)
-            collector.add_status_update(cancel_response["status"])
-        except Exception as e:
-            logger.error(f"Failed to cancel task: {str(e)}")
-            raise
-            
-        # Verify cancellation status
-        final_status = await client.check_task_status(task_id)
-        collector.add_status_update(final_status["status"])
-        
+        # Subscribe to SSE updates
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{client.base_url}/tasks/sendSubscribe",
+                json=task_data
+            ) as response:
+                if response.status != 200:
+                    raise Exception(f"Failed to subscribe to updates: {response.status}")
+                
+                # Let it run briefly to ensure it's in working state
+                await asyncio.sleep(2)
+                
+                # Process events until we get the task ID and working state
+                async for event in response.content:
+                    if event:
+                        event_data = event.decode()
+                        # Skip heartbeats and empty lines
+                        if not event_data.strip() or event_data == "data: ":
+                            continue
+                            
+                        # Ensure it's a data event and extract the JSON
+                        if event_data.startswith("data: "):
+                            try:
+                                data = json.loads(event_data.replace("data: ", "", 1))
+                                if "id" in data:
+                                    task_id = data["id"]
+                                if "status" in data:
+                                    collector.add_status_update(data["status"])
+                                    if data["status"]["state"] == "working":
+                                        break
+                            except json.JSONDecodeError as e:
+                                logger.error(f"Error decoding JSON from SSE event: {e}")
+                                logger.debug(f"Raw event data: {event_data}")
+                                continue
+                
+                if not task_id:
+                    raise Exception("Failed to get task ID from initial response")
+                
+                # Cancel the task
+                try:
+                    cancel_response = await client.cancel_task(task_id)
+                    collector.add_status_update(cancel_response["status"])
+                except Exception as e:
+                    logger.error(f"Failed to cancel task: {str(e)}")
+                    raise
+                
+                # Wait for final update
+                try:
+                    async for event in response.content:
+                        if event:
+                            event_data = event.decode()
+                            # Skip heartbeats and empty lines
+                            if not event_data.strip() or event_data == "data: ":
+                                continue
+                                
+                            # Ensure it's a data event and extract the JSON
+                            if event_data.startswith("data: "):
+                                try:
+                                    data = json.loads(event_data.replace("data: ", "", 1))
+                                    if "status" in data:
+                                        collector.add_status_update(data["status"])
+                                        if data["status"]["state"] == "cancelled":
+                                            break
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Error decoding JSON from SSE event: {e}")
+                                    logger.debug(f"Raw event data: {event_data}")
+                                    continue
+                except asyncio.TimeoutError:
+                    logger.warning("SSE connection timed out")
+                
         # Verify status sequence
         assert collector.verify_status_sequence(), "Invalid status transition sequence"
-        assert final_status["status"]["state"] == "cancelled", \
-            f"Task was not properly cancelled. Final state: {final_status['status']['state']}"
+        assert collector.status_updates[-1]["state"] == "cancelled", \
+            f"Task was not properly cancelled. Final state: {collector.status_updates[-1]['state']}"
             
         # Verify we can't cancel an already cancelled task
         with pytest.raises(Exception) as exc_info:
@@ -253,7 +311,26 @@ if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(level=logging.INFO)
     
+    # Start server manually when running directly
+    logger.info("Starting server...")
+    server = subprocess.Popen(
+        ["python", "src/main.py"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    # Wait for server to start
+    time.sleep(2)
+    
+    try:
+        # Run test
+        asyncio.run(test_push_notifications_streaming(server))
+    finally:
+        # Cleanup
+        logger.info("Stopping server...")
+        server.send_signal(signal.SIGINT)
+        server.wait()
+    
     # Run tests
-    asyncio.run(test_push_notifications_streaming())
     #asyncio.run(test_push_notifications_error_handling())
     #asyncio.run(test_push_notifications_cancellation()) 
