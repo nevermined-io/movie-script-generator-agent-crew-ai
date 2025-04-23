@@ -2,8 +2,13 @@
 Main entry point for the movie script generation API
 """
 
+import os
+from dotenv import load_dotenv
 import uvicorn
 from api.app import app
+
+# Load environment variables from .env file
+load_dotenv()
 
 def main():
     """Start the FastAPI application with uvicorn"""

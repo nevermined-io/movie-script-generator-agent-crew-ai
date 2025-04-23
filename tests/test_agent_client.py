@@ -15,6 +15,10 @@ from typing import Dict, Optional, Any
 import logging
 import os
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

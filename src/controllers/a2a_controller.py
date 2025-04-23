@@ -7,10 +7,11 @@ from uuid import uuid4
 import asyncio
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..models.task import TaskState, TaskStatus, Message, TextPart
-from ..models.a2a import Task
+from ..models.a2a import Task, PushNotificationConfig
 from ..models.agent_card import AGENT_CARD
 from ..core.generator import MovieScriptGenerator
 from ..models.script_artifact import create_script_artifact
@@ -42,6 +43,7 @@ class A2AController:
         """Initialize the controller with a task store."""
         if not self._initialized:
             self.tasks: Dict[str, Task] = {}
+            self.push_configs: Dict[str, PushNotificationConfig] = {}
             self.generator = MovieScriptGenerator()
             self.router = APIRouter()
             self._setup_routes()
@@ -61,6 +63,11 @@ class A2AController:
             response_model=Task
         )
         self.router.add_api_route(
+            "/tasks/sendSubscribe",
+            self.send_task_streaming,
+            methods=["POST"]
+        )
+        self.router.add_api_route(
             "/tasks/{task_id}",
             self.get_task,
             methods=["GET"],
@@ -77,6 +84,18 @@ class A2AController:
             self.list_tasks,
             methods=["GET"],
             response_model=List[Task]
+        )
+        self.router.add_api_route(
+            "/tasks/{task_id}/pushNotification",
+            self.set_push_notification,
+            methods=["POST"],
+            response_model=PushNotificationConfig
+        )
+        self.router.add_api_route(
+            "/tasks/{task_id}/pushNotification",
+            self.get_push_notification,
+            methods=["GET"],
+            response_model=PushNotificationConfig
         )
     
     async def get_agent_card(self):
@@ -125,19 +144,6 @@ class A2AController:
         # Store task
         self.tasks[task_id] = task
         
-        logger.log_script_generation(
-            task_id=task_id,
-            status="created",
-            metadata={
-                "title": request.title,
-                "tags": request.tags,
-                "idea": request.idea,
-                "lyrics": request.lyrics,
-                "duration": request.duration,
-                "custom_message": "CHARLY - Starting script generation..."
-            }
-        )
-        
         # Start background processing
         asyncio.create_task(self._process_task(task, request))
         
@@ -185,16 +191,16 @@ class A2AController:
                         sceneNumber=i + 1,
                         startTime="00:00",  # These should be calculated based on duration
                         endTime="00:00",    # These should be calculated based on duration
-                        shotType=scene.get("technical_details", {}).get("shot_type", ""),
-                        cameraMovement=scene.get("technical_details", {}).get("camera_movement", ""),
-                        cameraEquipment=scene.get("technical_details", {}).get("camera_equipment", ""),
-                        location=scene.get("technical_details", {}).get("location", ""),
-                        lightingSetup=scene.get("technical_details", {}).get("lighting_setup", {}),
-                        colorPalette=scene.get("technical_details", {}).get("color_palette", []),
-                        visualReferences=scene.get("technical_details", {}).get("visual_references", []),
-                        characterActions=scene.get("technical_details", {}).get("character_actions", {}),
-                        transitionType=scene.get("technical_details", {}).get("transition_type", ""),
-                        specialNotes=scene.get("technical_details", {}).get("special_notes", [])
+                        shotType=scene.get("shot_type", ""),
+                        cameraMovement=scene.get("camera_movement", ""),
+                        cameraEquipment=scene.get("camera_equipment", ""),
+                        location=scene.get("location", ""),
+                        lightingSetup=scene.get("lighting_setup", {}),
+                        colorPalette=scene.get("color_palette", []),
+                        visualReferences=scene.get("visual_references", []),
+                        characterActions=scene.get("character_actions", {}),
+                        transitionType=scene.get("transition_type", ""),
+                        specialNotes=scene.get("special_notes", [])
                     )
                     for i, scene in enumerate(result["scenes"])
                 ]
@@ -348,6 +354,55 @@ class A2AController:
             tasks = [t for t in tasks if t.status.state == state]
             
         return tasks
+
+    async def set_push_notification(self, task_id: str, config: PushNotificationConfig) -> PushNotificationConfig:
+        """Set push notification configuration for a task."""
+        if task_id not in self.tasks:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
+        try:
+            self.push_configs[task_id] = config
+            return config
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_push_notification(self, task_id: str) -> PushNotificationConfig:
+        """Get push notification configuration for a task."""
+        if task_id not in self.tasks:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        
+        try:
+            config = self.push_configs.get(task_id)
+            if not config:
+                raise HTTPException(status_code=404, detail=f"No push notification config found for task {task_id}")
+            return config
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def send_task_streaming(self, request: TaskRequest) -> StreamingResponse:
+        """Create and process a new task with streaming updates."""
+        task = await self.send_task(request)
+        
+        async def event_stream():
+            """Generate SSE events for task updates."""
+            while True:
+                current_task = self.tasks.get(task.id)
+                if not current_task:
+                    break
+                    
+                yield f"data: {current_task.json()}\n\n"
+                
+                if current_task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
+                    break
+                    
+                await asyncio.sleep(1)
+        
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream"
+        )
 
 def process_scene(scene_data: Dict[str, Any]) -> ExtractedScene:
     """Process raw scene data into an ExtractedScene object"""

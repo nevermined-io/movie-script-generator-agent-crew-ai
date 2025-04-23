@@ -10,6 +10,11 @@ from src.api.app import app
 from src.core.generator import MovieScriptGenerator
 from src.models.task import TaskState, TaskStatus, Message, TextPart, Artifact
 from src.models.a2a import Task, TaskSendParams
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file at the start of testing
+load_dotenv()
 
 @pytest.fixture
 def test_client():
