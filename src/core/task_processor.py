@@ -356,7 +356,7 @@ class TaskProcessor:
             try:
                 update = await queue.get()
                 yield update
-                if update.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED]:
+                if update.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
                     break
             except asyncio.CancelledError:
                 break
@@ -394,8 +394,8 @@ class TaskProcessor:
             raise ValueError(f"Task {task_id} not found")
         
         task.status = self._create_status_update(
-            TaskState.CANCELED,
-            "Task canceled by user request"
+            TaskState.CANCELLED,
+            "Task cancelled by user request"
         )
         task.history.append(task.status.message)
         await self._notify_update(task)

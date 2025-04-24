@@ -295,7 +295,7 @@ async def test_get_task_updates(task_processor):
     updates = []
     async for update in task_processor.get_task_updates(task.id):
         updates.append(update)
-        if update.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED]:
+        if update.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
             break
     
     # Verify we got exactly one COMPLETED update
@@ -316,12 +316,12 @@ async def test_cancel_task(task_processor):
     cancelled_task = await task_processor.cancel_task(task.id)
     
     # Verify task state
-    assert cancelled_task.status.state == TaskState.CANCELED
+    assert cancelled_task.status.state == TaskState.CANCELLED
     assert cancelled_task.id == task.id
     
     # Verify update was sent
     update = await task_processor._task_updates[task.id].get()
-    assert update.status.state == TaskState.CANCELED
+    assert update.status.state == TaskState.CANCELLED
 
 @pytest.mark.asyncio
 async def test_cancel_nonexistent_task(task_processor):

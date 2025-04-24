@@ -184,7 +184,7 @@ class AgentClient:
                 error_msg = task_status["status"]["message"]["parts"][0]["text"]
                 raise Exception(f"Task failed: {error_msg}")
             elif state == "cancelled":
-                raise Exception("Task was canceled")
+                raise Exception("Task was cancelled")
                 
             await asyncio.sleep(self.retry_delay)
             

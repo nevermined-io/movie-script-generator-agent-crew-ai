@@ -251,22 +251,22 @@ class A2AController:
             raise HTTPException(status_code=404, detail="Task not found")
         
         task = self.tasks[task_id]
-        if task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED]:
+        if task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
             raise HTTPException(status_code=400, detail="Task already finished")
         
         task.status = TaskStatus(
-            state=TaskState.CANCELED,
+            state=TaskState.CANCELLED,
             timestamp=datetime.utcnow().isoformat(),
             message=Message(
                 role="assistant",
-                parts=[TextPart(type="text", text="Task canceled by user request")]
+                parts=[TextPart(type="text", text="Task cancelled by user request")]
             )
         )
 
         # Log cancellation
         logger.log_script_generation(
             task_id=task_id,
-            status="canceled",
+            status="cancelled",
             metadata=task.metadata
         )
         

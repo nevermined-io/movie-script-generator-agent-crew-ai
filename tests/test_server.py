@@ -107,14 +107,11 @@ def mock_task_processor():
             id=task_id,
             sessionId=str(uuid.uuid4()),
             status=TaskStatus(
-                state=TaskState.CANCELED,
+                state=TaskState.CANCELLED,
                 timestamp=datetime.utcnow().isoformat(),
                 message=Message(
                     role="assistant",
-                    parts=[TextPart(
-                        text="Task canceled",
-                        type="text"
-                    )]
+                    parts=[TextPart(type="text", text="Task cancelled")]
                 )
             )
         )
@@ -244,7 +241,7 @@ async def test_cancel_task_success(test_client):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == "test-123"
-    assert data["status"]["state"] == TaskState.CANCELED
+    assert data["status"]["state"] == TaskState.CANCELLED
 
 def test_send_task_subscribe(test_client):
     """

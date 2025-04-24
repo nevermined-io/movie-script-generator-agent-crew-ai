@@ -180,7 +180,7 @@ class MockTaskProcessor(TaskProcessor):
         if task_id not in self._tasks:
             raise ValueError(f"Task {task_id} not found")
         task = self._tasks[task_id]
-        task.status.state = TaskState.CANCELED
+        task.status.state = TaskState.CANCELLED
         task.status.timestamp = datetime.utcnow().isoformat()
         task.status.message = Message(
             role="assistant",
@@ -215,7 +215,7 @@ class MockTaskProcessor(TaskProcessor):
             try:
                 task = await queue.get()
                 yield task
-                if task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELED]:
+                if task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
                     break
             except asyncio.CancelledError:
                 break
@@ -376,7 +376,7 @@ async def test_cancel_task_success(test_client, task_processor):
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == task.id
-    assert data["status"]["state"] == TaskState.CANCELED.value
+    assert data["status"]["state"] == TaskState.CANCELLED.value
 
 @pytest.mark.asyncio
 async def test_cancel_task_not_found(test_client):

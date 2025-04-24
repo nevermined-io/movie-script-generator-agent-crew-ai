@@ -14,7 +14,7 @@ class TaskState(str, Enum):
     WORKING = "working"
     COMPLETED = "completed"
     FAILED = "failed"
-    CANCELED = "canceled"
+    CANCELLED = "cancelled"
     INPUT_REQUIRED = "input-required"
 
 class Part(BaseModel):

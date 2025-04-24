@@ -127,8 +127,8 @@ def test_real_task_cancellation(test_client):
     
     # Verify cancellation
     result = response.json()
-    assert result["status"]["state"] == TaskState.CANCELED.value
-    assert "Task canceled" in result["status"]["message"]["parts"][0]["text"]
+    assert result["status"]["state"] == TaskState.CANCELLED.value
+    assert "Task cancelled" in result["status"]["message"]["parts"][0]["text"]
 
 def test_real_task_listing(test_client):
     """
