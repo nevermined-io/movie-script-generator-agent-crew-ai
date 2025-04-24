@@ -109,7 +109,6 @@ class MovieScriptGenerator:
 
             # Execute crew tasks
             result = crew.kickoff()
-            print(result.tasks_output[4])
 
             # Process results from CrewOutput
             script_result = {
