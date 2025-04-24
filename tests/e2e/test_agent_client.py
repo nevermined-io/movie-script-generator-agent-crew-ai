@@ -9,17 +9,72 @@ import os
 from datetime import datetime
 import pytest
 from dotenv import load_dotenv
+import requests
+import uvicorn
+import threading
+import time
 
 from src.client import AgentClient, AgentCardInterpreter
+from src.api.app import app
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def is_server_running():
+    """
+    * Check if the server is already running
+    * @returns {boolean} True if server is running, False otherwise
+    """
+    try:
+        response = requests.get("http://localhost:8000/health")
+        return response.status_code == 200
+    except requests.exceptions.ConnectionError:
+        return False
+
+def run_server():
+    """
+    * Run the FastAPI server in a separate thread
+    """
+    config = uvicorn.Config(
+        app=app,
+        host="127.0.0.1",  # Changed from 0.0.0.0 to localhost
+        port=8000,
+        log_level="info",
+        reload=False  # Ensure reload is disabled for testing
+    )
+    server = uvicorn.Server(config)
+    server.run()
+
+@pytest.fixture(scope="session")
+def server_process():
+    """
+    * Fixture to manage the server process
+    * Starts the server if not running and ensures cleanup
+    """
+    if not is_server_running():
+        logger.info("Starting server in a new thread...")
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+        
+        # Wait for server to start
+        retries = 5
+        while retries > 0 and not is_server_running():
+            time.sleep(1)
+            retries -= 1
+            logger.info(f"Waiting for server to start... {retries} retries left")
+        
+        if not is_server_running():
+            pytest.fail("Server failed to start")
+    
+    yield
+    # No need to cleanup as we're using daemon threads
+
 @pytest.mark.asyncio
-async def test_task_history_tracking():
+async def test_task_history_tracking(server_process):
     """
     Test that task history follows A2A protocol state transitions and structure
     """
@@ -94,7 +149,7 @@ async def test_task_history_tracking():
             raise
 
 @pytest.mark.asyncio
-async def test_history_error_handling():
+async def test_history_error_handling(server_process):
     """
     Test error handling for history-related operations according to A2A protocol
     """
@@ -130,4 +185,40 @@ async def test_history_error_handling():
                     "parts": [{"text": "Cannot work on completed task"}]
                 }
             })
-        assert "Invalid state transition" in str(exc_info.value) 
+        assert "Invalid state transition" in str(exc_info.value)
+
+if __name__ == "__main__":
+    """
+    * Run all async tests in sequence
+    * This allows for proper debugging with breakpoints
+    """
+    # Start server if needed
+    server_thread = None
+    if not is_server_running():
+        logger.info("Server not running. Starting server...")
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+        
+        # Wait for server to start
+        retries = 5
+        while retries > 0 and not is_server_running():
+            time.sleep(1)
+            retries -= 1
+            logger.info(f"Waiting for server to start... {retries} retries left")
+        
+        if not is_server_running():
+            raise Exception("Server failed to start")
+
+    try:
+        # Run each test
+        logger.info("Running task history tracking test...")
+        asyncio.run(test_task_history_tracking(None))
+        
+        logger.info("Running error handling test...")
+        asyncio.run(test_history_error_handling(None))
+        
+        logger.info("All tests completed successfully!")
+        
+    except Exception as e:
+        logger.error(f"Test failed: {str(e)}")
+        raise 
