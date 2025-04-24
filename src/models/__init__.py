@@ -2,16 +2,14 @@
 Domain models for the movie script generation system
 """
 
-from .domain import (
+from src.core.domain_models import (
     ExtractedScene,
-    Setting,
-    CharacterDetail,
     TransformedScene,
+    Setting,
+    ScriptCharacter as CharacterDetail,  # Alias for backward compatibility
+    ScriptMetadata,
     ExtractedSceneList,
     SettingList,
-    CharacterDetailList,
-    TransformedSceneList,
-    Aesthetic,
-    TechnicalDetails,
-    SceneCharacter
+    CharacterList as CharacterDetailList,  # Alias for backward compatibility
+    TransformedSceneList
 ) 

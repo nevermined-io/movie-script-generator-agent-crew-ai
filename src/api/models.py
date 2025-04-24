@@ -4,7 +4,7 @@ API models for the movie script generation system
 
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from src.models import ExtractedScene, Setting, CharacterDetail, TransformedScene
+from src.core.domain_models import ExtractedScene, TransformedScene, Setting, ScriptCharacter, ScriptMetadata
 
 class ScriptRequest(BaseModel):
     """
@@ -56,38 +56,6 @@ class SceneCharacter(BaseModel):
     actions: str
     interaction: str
 
-class ExtractedScene(BaseModel):
-    """
-    Model for extracted scene details
-    
-    @param sceneNumber - Scene number in sequence
-    @param startTime - Scene start time (MM:SS)
-    @param endTime - Scene end time (MM:SS)
-    @param shotType - Type of camera shot
-    @param cameraMovement - Camera movement description
-    @param cameraEquipment - Camera gear used
-    @param location - Scene location
-    @param lightingSetup - Lighting configuration
-    @param colorPalette - List of colors used
-    @param visualReferences - List of visual references
-    @param characterActions - Map of character names to actions
-    @param transitionType - Scene transition type
-    @param specialNotes - Additional technical notes
-    """
-    sceneNumber: int
-    startTime: str
-    endTime: str
-    shotType: str
-    cameraMovement: str
-    cameraEquipment: str
-    location: str
-    lightingSetup: Dict[str, Any]
-    colorPalette: List[str]
-    visualReferences: List[str]
-    characterActions: Dict[str, str]
-    transitionType: str
-    specialNotes: List[str]
-
 class Setting(BaseModel):
     """
     Model for setting details
@@ -132,39 +100,21 @@ class CharacterDetail(BaseModel):
     sceneSpecificChanges: str
     imagePrompt: str
 
-class TransformedScene(BaseModel):
-    """
-    Model for transformed scene details
-    
-    @param sceneNumber - Scene number in sequence
-    @param prompt - Scene generation prompt
-    @param charactersInScene - List of character names
-    @param settingId - Reference to setting
-    @param duration - Scene duration in seconds
-    @param technicalDetails - Technical specifications
-    """
-    sceneNumber: int
-    prompt: str
-    charactersInScene: List[str]
-    settingId: str
-    duration: int
-    technicalDetails: Dict[str, Any]
-
 class ScriptResponse(BaseModel):
     """
     Response model for script generation
     
-    @param transformedScenes - List of scenes with production prompts
     @param settings - List of unique settings/locations
     @param characters - List of character details
     @param script - Complete script text
     @param scenes - Technical scene details
+    @param transformedScenes - List of scenes with production prompts
     """
-    transformedScenes: List[TransformedScene]
     settings: List[Setting]
-    characters: List[CharacterDetail]
+    characters: List[ScriptCharacter]
     script: str
     scenes: List[ExtractedScene]
+    transformedScenes: List[TransformedScene]
 
 class ExtractedSceneList(BaseModel):
     """
