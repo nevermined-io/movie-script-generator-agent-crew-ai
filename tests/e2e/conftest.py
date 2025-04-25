@@ -6,7 +6,7 @@ import asyncio
 import uvicorn
 import multiprocessing
 import time
-from src.server import app
+from src.api.app import app
 
 def run_server():
     """Run the FastAPI server"""

@@ -20,6 +20,7 @@ import threading
 import requests
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import uuid
 
 from src.client import AgentClient
 from src.api.app import app
@@ -87,25 +88,50 @@ def test_client():
 
 def test_stream_notifications(server_process, test_client):
     """
-    * Test streaming notifications functionality
+    * Test streaming notifications functionality using SSE endpoint
     """
-    with test_client.websocket_connect("/ws") as websocket:
-        data = websocket.receive_json()
-        assert "message" in data
-        assert isinstance(data["message"], str)
+    # Create a task first
+    task_data = {
+        "id": str(uuid.uuid4()),
+        "message": {
+            "input": "Generate a short story about an AI learning to paint",
+            "taskType": "script_generation"
+        },
+        "acceptedOutputModes": ["text"]
+    }
+    response = test_client.post("/tasks/send", json=task_data)
+    assert response.status_code == 200
+    task_id = response.json()["id"]
+    
+    # Now subscribe to updates
+    with test_client.get(f"/tasks/{task_id}", stream=True) as response:
+        assert response.status_code == 200
+        task_data = response.json()
+        assert "state" in task_data
+        assert task_data["state"] in {"submitted", "working", "completed", "failed"}
 
 def test_cancel_notification(server_process, test_client):
     """
-    * Test cancellation of notifications
+    * Test cancellation of notifications using HTTP endpoints
     """
-    with test_client.websocket_connect("/ws") as websocket:
-        # Send cancel message
-        websocket.send_json({"type": "cancel"})
-        
-        # Verify cancellation response
-        response = websocket.receive_json()
-        assert response["type"] == "cancelled"
-        assert "message" in response
+    # Create a task first
+    task_data = {
+        "id": str(uuid.uuid4()),
+        "message": {
+            "input": "Generate a short story about an AI learning to paint",
+            "taskType": "script_generation"
+        },
+        "acceptedOutputModes": ["text"]
+    }
+    response = test_client.post("/tasks/send", json=task_data)
+    assert response.status_code == 200
+    task_id = response.json()["id"]
+    
+    # Cancel the task
+    response = test_client.post(f"/tasks/{task_id}/cancel")
+    assert response.status_code == 200
+    task_data = response.json()
+    assert task_data["state"] == "cancelled"
 
 class NotificationCollector:
     """

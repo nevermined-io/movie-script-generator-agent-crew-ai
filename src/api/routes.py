@@ -3,17 +3,29 @@ FastAPI routes for the Movie Script Generator Agent.
 """
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
 from src.core.generator import MovieScriptGenerator
 from src.api.models import ScriptRequest, ScriptResponse
 from src.models.a2a import Task, PushNotificationConfig
 from src.controllers.a2a_controller import controller, TaskRequest
 from src.utils.logger import logger
+import json
 
 # Create router
 router = APIRouter()
 
 # Initialize generator
 generator = MovieScriptGenerator()
+
+@router.get("/.well-known/openapi.json")
+async def get_openapi_spec():
+    """
+    Get the OpenAPI specification for this API.
+    
+    @returns {object} The OpenAPI specification
+    """
+    with open(".well-known/openapi.json", "r") as f:
+        return JSONResponse(content=json.loads(f.read()))
 
 @router.get("/.well-known/agent.json")
 async def get_agent_card():
