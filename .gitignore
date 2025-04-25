@@ -9,3 +9,4 @@ movie_script_generator.log
 *.egg-info
 .coverage.*
 .pytest_cache/
+requirements.old.txt
