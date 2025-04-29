@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy source code
 COPY src/ ./src/
+COPY .well-known/ ./.well-known/
 COPY run.py .
 COPY setup.py .
 
