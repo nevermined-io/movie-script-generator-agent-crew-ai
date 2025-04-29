@@ -21,6 +21,8 @@ from src.api.app import app
 # Load environment variables from .env file
 load_dotenv()
 
+PROXY_URL = os.getenv("PROXY_URL")
+
 # Configure logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +36,7 @@ def is_server_running():
     * @returns {boolean} True if server is running, False otherwise
     """
     try:
-        response = requests.get("http://localhost:8000/health")
+        response = requests.get(f"{PROXY_URL}/health")
         return response.status_code == 200
     except requests.exceptions.ConnectionError:
         return False
@@ -86,7 +88,7 @@ class TestAgentClient(unittest.TestCase):
         """
         logger.info("=== Starting Task History Tracking Test ===")
         
-        async with AgentClient(base_url="http://localhost:8000") as client:
+        async with AgentClient(base_url=PROXY_URL) as client:
             # Get agent card first
             logger.info("Requesting agent card...")
             agent_card = await client.get_agent_card()
@@ -170,7 +172,7 @@ class TestAgentClient(unittest.TestCase):
         
         # Test non-existent task ID
         logger.info("Testing non-existent task ID...")
-        async with AgentClient(base_url="http://localhost:8000") as client:
+        async with AgentClient(base_url=PROXY_URL) as client:
             task_id = "non-existent-task"
             try:
                 await client.get_task_history(task_id)
@@ -179,7 +181,7 @@ class TestAgentClient(unittest.TestCase):
             
         # Test invalid state transitions
         logger.info("Testing invalid state transitions...")
-        async with AgentClient(base_url="http://localhost:8000") as client:
+        async with AgentClient(base_url=PROXY_URL) as client:
             task_id = "test-task"
             
             # Start with completed state
