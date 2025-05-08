@@ -1,7 +1,7 @@
 """
 Agent Card definition for the Movie Script Generator Agent.
 """
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 class AgentProvider(BaseModel):
@@ -42,6 +42,7 @@ class AgentCard(BaseModel):
     version: str = "1.0.0"
     documentationUrl: Optional[str] = None
     capabilities: AgentCapabilities = AgentCapabilities()
+    authentication: Dict[str, Any] = {"schemes": ["public"]}
     defaultInputModes: List[str] = ["text/plain", "application/json"]
     defaultOutputModes: List[str] = ["application/json", "text/plain", "text/markdown"]
     skills: List[AgentSkill] = [

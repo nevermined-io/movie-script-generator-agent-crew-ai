@@ -30,7 +30,7 @@ def is_server_running():
     * @returns {boolean} True if server is running, False otherwise
     """
     try:
-        response = requests.get("http://localhost:8000/health")
+        response = requests.get("http://localhost:8002/health")
         return response.status_code == 200
     except requests.exceptions.ConnectionError:
         return False
@@ -42,7 +42,7 @@ def run_server():
     config = uvicorn.Config(
         app=app,
         host="127.0.0.1",  # Changed from 0.0.0.0 to localhost
-        port=8000,
+        port=8002,
         log_level="info",
         reload=False  # Ensure reload is disabled for testing
     )
@@ -78,7 +78,7 @@ async def test_task_history_tracking(server_process):
     """
     Test that task history follows A2A protocol state transitions and structure
     """
-    async with AgentClient(base_url="http://localhost:8000") as client:
+    async with AgentClient(base_url="http://localhost:8002") as client:
         # Get agent card first
         agent_card = await client.get_agent_card()
         
@@ -87,7 +87,33 @@ async def test_task_history_tracking(server_process):
             agent_card,
             "Write a short comedy script about a misunderstanding at a coffee shop"
         )
-        task_response = await client.send_task(task_data)
+        print("task_data generado:", json.dumps(task_data, indent=2))
+        envelope = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tasks/send",
+            "params": {
+                "sessionId": None,
+                "message": {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": task_data["idea"]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "title": task_data["title"],
+                    "tags": task_data["tags"],
+                    "idea": task_data["idea"],
+                    "duration": task_data.get("duration"),
+                    "lyrics": task_data.get("lyrics")
+                }
+            }
+        }
+        print("Envelope enviado:", json.dumps(envelope, indent=2))
+        task_response = await client.send_task(envelope)
         task_id = task_response["id"]
         
         try:
@@ -160,14 +186,14 @@ async def test_history_error_handling(server_process):
     assert "Session not initialized" in str(exc_info.value)
     
     # Test non-existent task ID
-    async with AgentClient(base_url="http://localhost:8000") as client:
+    async with AgentClient(base_url="http://localhost:8002") as client:
         task_id = "non-existent-task"
         with pytest.raises(Exception) as exc_info:
             await client.get_task_history(task_id)
         assert f"Task {task_id} not found" in str(exc_info.value)
         
     # Test invalid state transitions
-    async with AgentClient(base_url="http://localhost:8000") as client:
+    async with AgentClient(base_url="http://localhost:8002") as client:
         task_id = "test-task"
         # Start with completed state
         await client._update_task_history(task_id, {

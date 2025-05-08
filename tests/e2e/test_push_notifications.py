@@ -92,14 +92,36 @@ def test_stream_notifications(server_process, test_client):
     """
     # Create a task first
     task_data = {
-        "id": str(uuid.uuid4()),
-        "message": {
-            "input": "Generate a short story about an AI learning to paint",
-            "taskType": "script_generation"
-        },
-        "acceptedOutputModes": ["text"]
+        "title": "AI Paints a Dream",
+        "tags": ["short story", "AI", "painting"],
+        "idea": "An AI learns to paint and discovers creativity.",
+        "duration": 5
     }
-    response = test_client.post("/tasks/send", json=task_data)
+    envelope = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tasks/send",
+        "params": {
+            "sessionId": None,
+            "message": {
+                "role": "user",
+                "parts": [
+                    {
+                        "type": "text",
+                        "text": task_data["idea"]
+                    }
+                ]
+            },
+            "metadata": {
+                "title": task_data["title"],
+                "tags": task_data["tags"],
+                "idea": task_data["idea"],
+                "duration": task_data.get("duration"),
+                "lyrics": task_data.get("lyrics")
+            }
+        }
+    }
+    response = test_client.post("/tasks/send", json=envelope)
     assert response.status_code == 200
     task_id = response.json()["id"]
     
@@ -116,14 +138,36 @@ def test_cancel_notification(server_process, test_client):
     """
     # Create a task first
     task_data = {
-        "id": str(uuid.uuid4()),
-        "message": {
-            "input": "Generate a short story about an AI learning to paint",
-            "taskType": "script_generation"
-        },
-        "acceptedOutputModes": ["text"]
+        "title": "War and Peace Analysis",
+        "tags": ["analysis", "literature", "War and Peace"],
+        "idea": "A detailed analysis of War and Peace.",
+        "duration": 60
     }
-    response = test_client.post("/tasks/send", json=task_data)
+    envelope = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tasks/send",
+        "params": {
+            "sessionId": None,
+            "message": {
+                "role": "user",
+                "parts": [
+                    {
+                        "type": "text",
+                        "text": task_data["idea"]
+                    }
+                ]
+            },
+            "metadata": {
+                "title": task_data["title"],
+                "tags": task_data["tags"],
+                "idea": task_data["idea"],
+                "duration": task_data.get("duration"),
+                "lyrics": task_data.get("lyrics")
+            }
+        }
+    }
+    response = test_client.post("/tasks/send", json=envelope)
     assert response.status_code == 200
     task_id = response.json()["id"]
     
@@ -219,16 +263,42 @@ async def test_push_notifications_streaming(server_process=None):
         agent_card = await client.get_agent_card()
         
         # Create streaming task
-        task_data = await client.interpreter.create_task_data(
-            agent_card,
-            "Generate a short story about an AI learning to paint"
-        )
+        task_data = {
+            "title": "AI Paints a Dream",
+            "tags": ["short story", "AI", "painting"],
+            "idea": "An AI learns to paint and discovers creativity.",
+            "duration": 5
+        }
+        envelope = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tasks/sendSubscribe",
+            "params": {
+                "sessionId": None,
+                "message": {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": task_data["idea"]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "title": task_data["title"],
+                    "tags": task_data["tags"],
+                    "idea": task_data["idea"],
+                    "duration": task_data.get("duration"),
+                    "lyrics": task_data.get("lyrics")
+                }
+            }
+        }
         
         # Subscribe to SSE updates
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{client.base_url}/tasks/sendSubscribe",
-                json=task_data
+                json=envelope
             ) as response:
                 if response.status != 200:
                     raise Exception(f"Failed to subscribe to updates: {response.status}")
@@ -287,12 +357,39 @@ async def test_push_notifications_error_handling():
         
         # Create task with invalid data to trigger error
         task_data = {
-            "invalid": "data"
+            "title": "",
+            "tags": [],
+            "idea": "",
+            "duration": None
+        }
+        envelope = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tasks/send",
+            "params": {
+                "sessionId": None,
+                "message": {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": task_data["idea"]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "title": task_data["title"],
+                    "tags": task_data["tags"],
+                    "idea": task_data["idea"],
+                    "duration": task_data.get("duration"),
+                    "lyrics": task_data.get("lyrics")
+                }
+            }
         }
         
         # Expect task to fail
         with pytest.raises(Exception) as exc_info:
-            task_response = await client.send_task(task_data)
+            task_response = await client.send_task(envelope)
             
         assert "Failed to send task" in str(exc_info.value)
 
@@ -309,16 +406,42 @@ async def test_push_notifications_cancellation():
         agent_card = await client.get_agent_card()
         
         # Create long-running task
-        task_data = await client.interpreter.create_task_data(
-            agent_card,
-            "Write a detailed analysis of War and Peace"
-        )
+        task_data = {
+            "title": "War and Peace Analysis",
+            "tags": ["analysis", "literature", "War and Peace"],
+            "idea": "A detailed analysis of War and Peace.",
+            "duration": 60
+        }
+        envelope = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tasks/sendSubscribe",
+            "params": {
+                "sessionId": None,
+                "message": {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": task_data["idea"]
+                        }
+                    ]
+                },
+                "metadata": {
+                    "title": task_data["title"],
+                    "tags": task_data["tags"],
+                    "idea": task_data["idea"],
+                    "duration": task_data.get("duration"),
+                    "lyrics": task_data.get("lyrics")
+                }
+            }
+        }
         
         # Subscribe to SSE updates
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{client.base_url}/tasks/sendSubscribe",
-                json=task_data
+                json=envelope
             ) as response:
                 if response.status != 200:
                     raise Exception(f"Failed to subscribe to updates: {response.status}")

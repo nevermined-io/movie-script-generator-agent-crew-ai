@@ -6,7 +6,7 @@ from typing import Dict, Optional, List, Any
 from uuid import uuid4
 import asyncio
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -51,28 +51,26 @@ class A2AController:
         """Return the agent card describing this agent's capabilities."""
         return AGENT_CARD
 
-    async def send_task(self, request: TaskRequest) -> Task:
-        """Create and process a new task."""
+    async def send_task(self, *, title: str, tags: list, idea: str, lyrics: str = None, duration: int = None, sessionId: str = None) -> Task:
+        """Create and process a new task (A2A strict params)."""
         task_id = str(uuid4())
-        
         # Log task creation
         logger.log_script_generation(
             task_id=task_id,
             status="created",
             metadata={
-                "title": request.title,
-                "tags": request.tags,
-                "idea": request.idea,
-                "lyrics": request.lyrics,
-                "duration": request.duration,
-                "session_id": request.sessionId,
+                "title": title,
+                "tags": tags,
+                "idea": idea,
+                "lyrics": lyrics,
+                "duration": duration,
+                "session_id": sessionId,
             }
         )
-        
         # Create initial task with submitted status
         task = Task(
             id=task_id,
-            sessionId=request.sessionId,
+            sessionId=sessionId,
             status=TaskStatus(
                 state=TaskState.SUBMITTED,
                 timestamp=datetime.utcnow().isoformat(),
@@ -82,21 +80,24 @@ class A2AController:
                 )
             ),
             metadata={
-                "title": request.title,
-                "tags": request.tags,
-                "idea": request.idea,
-                "lyrics": request.lyrics,
-                "duration": request.duration
+                "title": title,
+                "tags": tags,
+                "idea": idea,
+                "lyrics": lyrics,
+                "duration": duration
             }
         )
-        
         # Store task
         self.tasks[task_id] = task
-        
         # Start background processing
-        asyncio.create_task(self._process_task(task, request))
-        
-        
+        asyncio.create_task(self._process_task(task, TaskRequest(
+            title=title,
+            tags=tags,
+            idea=idea,
+            lyrics=lyrics,
+            duration=duration,
+            sessionId=sessionId
+        )))
         return task
         
     async def _process_task(self, task: Task, request: TaskRequest):
@@ -318,7 +319,14 @@ class A2AController:
 
     async def send_task_streaming(self, request: TaskRequest) -> StreamingResponse:
         """Create and process a new task with streaming updates."""
-        task = await self.send_task(request)
+        task = await self.send_task(
+            title=request.title,
+            tags=request.tags,
+            idea=request.idea,
+            lyrics=request.lyrics,
+            duration=request.duration,
+            sessionId=request.sessionId
+        )
         
         async def event_stream():
             """Generate SSE events for task updates."""
@@ -346,4 +354,66 @@ def process_scene(scene_data: Dict[str, Any]) -> ExtractedScene:
     )
 
 # Create singleton instance
-controller = A2AController() 
+controller = A2AController()
+
+router = APIRouter()
+
+@router.post("/tasks/send")
+async def send_task_rpc(request: Request):
+    """
+    Endpoint compatible with A2A JSON-RPC 2.0 for sending tasks.
+    Only accepts requests strictly following the A2A protocol.
+    """
+    body = await request.json()
+    # Validate JSON-RPC 2.0 structure
+    if (
+        not isinstance(body, dict)
+        or body.get("jsonrpc") != "2.0"
+        or body.get("method") != "tasks/send"
+        or "params" not in body
+    ):
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC 2.0 request for A2A protocol.")
+    params = body["params"]
+    # Required fields
+    task_id = params.get("id")
+    session_id = params.get("sessionId")
+    message = params.get("message")
+    metadata = params.get("metadata", {})
+    if not task_id or not message or "role" not in message or "parts" not in message:
+        raise HTTPException(status_code=400, detail="Missing required A2A fields in params.")
+    # Only support 'user' role for now
+    if message["role"] != "user":
+        raise HTTPException(status_code=400, detail="Only 'user' role supported for task creation.")
+    # Extract text part (A2A allows multiple parts, but we expect at least one text part)
+    text_part = next((p for p in message["parts"] if p.get("type") == "text"), None)
+    if not text_part:
+        raise HTTPException(status_code=400, detail="At least one text part required in message.parts.")
+    # Optionally extract structured parameters from metadata
+    # For compatibility, expect movie script params in metadata
+    title = metadata.get("title")
+    tags = metadata.get("tags")
+    idea = metadata.get("idea")
+    lyrics = metadata.get("lyrics")
+    duration = metadata.get("duration")
+    # Validate required movie script params
+    if not title or not tags or not idea:
+        raise HTTPException(status_code=400, detail="Missing required movie script parameters in metadata (title, tags, idea).")
+    # Build TaskRequest
+    task_request = TaskRequest(
+        title=title,
+        tags=tags,
+        idea=idea,
+        lyrics=lyrics,
+        duration=duration,
+        sessionId=session_id
+    )
+    # Use the existing controller logic
+    task = await controller.send_task(
+        title=title,
+        tags=tags,
+        idea=idea,
+        lyrics=lyrics,
+        duration=duration,
+        sessionId=session_id
+    )
+    return task 

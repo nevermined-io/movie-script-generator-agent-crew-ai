@@ -10,3 +10,4 @@ movie_script_generator.log
 .coverage.*
 .pytest_cache/
 requirements.old.txt
+*.pyc

@@ -12,7 +12,7 @@ load_dotenv()
 
 def main():
     """Start the FastAPI application with uvicorn"""
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8002)
 
 if __name__ == "__main__":
     main() 

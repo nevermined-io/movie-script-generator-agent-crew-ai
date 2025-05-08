@@ -2,7 +2,7 @@
 FastAPI routes for the Movie Script Generator Agent.
 """
 from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from src.core.generator import MovieScriptGenerator
 from src.api.models import ScriptRequest, ScriptResponse
@@ -36,30 +36,96 @@ async def get_agent_card():
     """
     return await controller.get_agent_card()
 
-@router.post("/tasks/send", response_model=Task)
-async def create_task(input_data: TaskRequest):
+@router.post("/tasks/send")
+async def create_task(request: Request):
     """
-    Create a new script generation task.
-    
-    @param {TaskRequest} input_data The task request data
+    Create a new script generation task (A2A strict JSON-RPC 2.0 only).
+    @param {Request} request The HTTP request containing JSON-RPC 2.0 body
     @returns {Task} The created task
     """
-    logger.log_script_generation(
-        task_id="api",
-        status="task_requested",
-        metadata=input_data.model_dump()
+    body = await request.json()
+    # Validate JSON-RPC 2.0 structure
+    if (
+        not isinstance(body, dict)
+        or body.get("jsonrpc") != "2.0"
+        or body.get("method") != "tasks/send"
+        or "params" not in body
+    ):
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC 2.0 request for A2A protocol.")
+    params = body["params"]
+    # Required fields
+    session_id = params.get("sessionId")
+    message = params.get("message")
+    metadata = params.get("metadata", {})
+    if not message or "role" not in message or "parts" not in message:
+        raise HTTPException(status_code=400, detail="Missing required A2A fields in params.")
+    if message["role"] != "user":
+        raise HTTPException(status_code=400, detail="Only 'user' role supported for task creation.")
+    text_part = next((p for p in message["parts"] if p.get("type") == "text"), None)
+    if not text_part:
+        raise HTTPException(status_code=400, detail="At least one text part required in message.parts.")
+    # Movie script params must be in metadata
+    title = metadata.get("title")
+    tags = metadata.get("tags")
+    idea = metadata.get("idea")
+    lyrics = metadata.get("lyrics")
+    duration = metadata.get("duration")
+    if not title or not tags or not idea:
+        raise HTTPException(status_code=400, detail="Missing required movie script parameters in metadata (title, tags, idea).")
+    task = await controller.send_task(
+        title=title,
+        tags=tags,
+        idea=idea,
+        lyrics=lyrics,
+        duration=duration,
+        sessionId=session_id
     )
-    return await controller.send_task(input_data)
+    return task
 
 @router.post("/tasks/sendSubscribe")
-async def send_task_streaming(request: TaskRequest):
+async def send_task_streaming(request: Request):
     """
-    Create and process a new task with streaming updates.
-    
-    @param {TaskRequest} request The task request data
+    Create and process a new task with streaming updates (A2A strict JSON-RPC 2.0 only).
+    @param {Request} request The HTTP request containing JSON-RPC 2.0 body
     @returns {StreamingResponse} Stream of task updates
     """
-    return await controller.send_task_streaming(request)
+    body = await request.json()
+    # Validate JSON-RPC 2.0 structure
+    if (
+        not isinstance(body, dict)
+        or body.get("jsonrpc") != "2.0"
+        or body.get("method") != "tasks/sendSubscribe"
+        or "params" not in body
+    ):
+        raise HTTPException(status_code=400, detail="Invalid JSON-RPC 2.0 request for A2A protocol.")
+    params = body["params"]
+    session_id = params.get("sessionId")
+    message = params.get("message")
+    metadata = params.get("metadata", {})
+    if not message or "role" not in message or "parts" not in message:
+        raise HTTPException(status_code=400, detail="Missing required A2A fields in params.")
+    if message["role"] != "user":
+        raise HTTPException(status_code=400, detail="Only 'user' role supported for task creation.")
+    text_part = next((p for p in message["parts"] if p.get("type") == "text"), None)
+    if not text_part:
+        raise HTTPException(status_code=400, detail="At least one text part required in message.parts.")
+    title = metadata.get("title")
+    tags = metadata.get("tags")
+    idea = metadata.get("idea")
+    lyrics = metadata.get("lyrics")
+    duration = metadata.get("duration")
+    if not title or not tags or not idea:
+        raise HTTPException(status_code=400, detail="Missing required movie script parameters in metadata (title, tags, idea).")
+    return await controller.send_task_streaming(
+        TaskRequest(
+            title=title,
+            tags=tags,
+            idea=idea,
+            lyrics=lyrics,
+            duration=duration,
+            sessionId=session_id
+        )
+    )
 
 @router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str):
