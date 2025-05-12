@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Dict, Optional, List, Any
 from uuid import uuid4
 import asyncio
+import json
+import time
+import os
 
 from fastapi import HTTPException, Request, APIRouter
 from fastapi.responses import StreamingResponse
@@ -17,6 +20,7 @@ from ..core.generator import MovieScriptGenerator
 from ..models.script_artifact import create_script_artifact
 from ..core.domain_models import ExtractedScene, TransformedScene, ScriptMetadata, ScriptCharacter
 from ..utils.logger import logger
+from ..models.sse import TaskStatusUpdateEvent, TaskArtifactUpdateEvent, TaskErrorEvent, SSEKeepAliveEvent
 
 class TaskRequest(BaseModel):
     """Request model for task creation."""
@@ -75,7 +79,7 @@ class A2AController:
                 state=TaskState.SUBMITTED,
                 timestamp=datetime.utcnow().isoformat(),
                 message=Message(
-                    role="assistant",
+                    role="agent",
                     parts=[TextPart(type="text", text="Starting script generation...")]
                 )
             ),
@@ -108,7 +112,7 @@ class A2AController:
                 state=TaskState.WORKING,
                 timestamp=datetime.utcnow().isoformat(),
                 message=Message(
-                    role="assistant",
+                    role="agent",
                     parts=[TextPart(type="text", text="Generating movie script...")]
                 )
             )
@@ -145,7 +149,6 @@ class A2AController:
                 transformed_scenes = [
                     TransformedScene(
                         sceneNumber=i + 1,
-                        description=scene.get("description", ""),
                         prompt=scene.get("prompt", ""),
                         charactersInScene=scene.get("characters_in_scene", []),
                         settingId=scene.get("setting_id", ""),
@@ -182,7 +185,7 @@ class A2AController:
                     state=TaskState.COMPLETED,
                     timestamp=datetime.utcnow().isoformat(),
                     message=Message(
-                        role="assistant",
+                        role="agent",
                         parts=[TextPart(type="text", text=f"Successfully generated script for '{request.title}'")]
                     )
                 )
@@ -202,7 +205,7 @@ class A2AController:
                     state=TaskState.FAILED,
                     timestamp=datetime.utcnow().isoformat(),
                     message=Message(
-                        role="assistant",
+                        role="agent",
                         parts=[TextPart(type="text", text=error_message)]
                     )
                 )
@@ -225,7 +228,7 @@ class A2AController:
                 state=TaskState.FAILED,
                 timestamp=datetime.utcnow().isoformat(),
                 message=Message(
-                    role="assistant",
+                    role="agent",
                     parts=[TextPart(type="text", text=error_message)]
                 )
             )
@@ -259,7 +262,7 @@ class A2AController:
             state=TaskState.CANCELLED,
             timestamp=datetime.utcnow().isoformat(),
             message=Message(
-                role="assistant",
+                role="agent",
                 parts=[TextPart(type="text", text="Task cancelled by user request")]
             )
         )
@@ -317,35 +320,231 @@ class A2AController:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    def _create_status_update_event(self, task: Task, final: bool = False) -> str:
+        """Create a formatted SSE status update event."""
+        # For final and completed events, it is important to include the artifact in the result
+        # to comply with the A2A format that requires the last status_update to include everything
+        result = {
+            "id": task.id,
+            "status": task.status,
+            "final": final,
+        }
+        
+        # Include metadata if exists
+        if task.metadata:
+            result["metadata"] = task.metadata
+            
+        # Include artifacts in the final event if they exist
+        if final and task.status.state == TaskState.COMPLETED and task.artifacts:
+            result["artifacts"] = task.artifacts
+            
+        # Convert to Pydantic model to use its serialization
+        event = TaskStatusUpdateEvent(**result)
+        return event.format_sse()
+        
+    def _create_artifact_event(self, task: Task, artifact_index: int = 0) -> str:
+        """Create a formatted SSE artifact event."""
+        if not task.artifacts or len(task.artifacts) <= artifact_index:
+            return None
+            
+        event = TaskArtifactUpdateEvent(
+            id=task.id,
+            artifact=task.artifacts[artifact_index],
+            metadata=task.metadata
+        )
+        return event.format_sse()
+        
+    def _create_error_event(self, task_id: str, code: int, message: str, details: Any = None) -> str:
+        """Create a formatted SSE error event."""
+        error_data = {
+            "code": code,
+            "message": message
+        }
+        
+        if details:
+            error_data["data"] = {"details": details}
+            
+        event = TaskErrorEvent(
+            id=task_id,
+            error=error_data
+        )
+        return event.format_sse()
+        
+    def _create_keep_alive_event(self) -> str:
+        """Create a formatted SSE keep-alive event."""
+        event = SSEKeepAliveEvent(timestamp=datetime.utcnow().isoformat())
+        return event.format_sse()
+
     async def send_task_streaming(self, request: TaskRequest) -> StreamingResponse:
-        """Create and process a new task with streaming updates."""
-        task = await self.send_task(
-            title=request.title,
-            tags=request.tags,
-            idea=request.idea,
-            lyrics=request.lyrics,
-            duration=request.duration,
-            sessionId=request.sessionId
-        )
-        
-        async def event_stream():
-            """Generate SSE events for task updates."""
-            while True:
-                current_task = self.tasks.get(task.id)
-                if not current_task:
-                    break
+        """
+        Create and process a new task with streaming updates.
+        If DEMO_MODE is active, returns a demo JSON after 10 seconds.
+        """
+        if os.environ.get("DEMO_MODE", "false").lower() == "true":
+            demo_path = os.path.join(os.path.dirname(__file__), "demo_response.json")
+            with open(demo_path, "r") as f:
+                demo_json = json.load(f)
+            async def demo_stream():
+                await asyncio.sleep(3)
+                yield f"event: completion\ndata: {json.dumps(demo_json)}\n\n"
+            return StreamingResponse(
+                demo_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        try:
+            task = await self.send_task(
+                title=request.title,
+                tags=request.tags,
+                idea=request.idea,
+                lyrics=request.lyrics,
+                duration=request.duration,
+                sessionId=request.sessionId
+            )
+            
+            async def event_stream():
+                """Generate SSE events for task updates."""
+                try:
+                    # Initial status update
+                    yield self._create_status_update_event(task)
                     
-                yield f"data: {current_task.json()}\n\n"
+                    last_state = task.status.state
+                    had_error = False
+                    sent_final_update = False
+                    
+                    # Keep track of last activity time for keep-alive messages
+                    last_activity = time.time()
+                    
+                    while True:
+                        current_time = time.time()
+                        current_task = self.tasks.get(task.id)
+                        
+                        if not current_task:
+                            # Task not found, send error and break
+                            yield self._create_error_event(
+                                task_id=task.id, 
+                                code=-32000, 
+                                message="Task not found",
+                                details="Task may have been deleted"
+                            )
+                            break
+                        
+                        # Send a keep-alive comment every 15 seconds if no other activity
+                        if current_time - last_activity > 15:
+                            yield self._create_keep_alive_event()
+                            last_activity = current_time
+                            continue
+                        
+                        # Check for state changes
+                        current_state = current_task.status.state
+                        state_changed = current_state != last_state
+                        
+                        if state_changed:
+                            # State changed, send a status update
+                            last_state = current_state
+                            last_activity = current_time
+                            
+                            # Check if task failed
+                            if current_state == TaskState.FAILED:
+                                # Send error event for failed tasks
+                                error_message = "Task processing failed"
+                                if current_task.status.message and current_task.status.message.parts:
+                                    for part in current_task.status.message.parts:
+                                        if hasattr(part, 'text'):
+                                            error_message = part.text
+                                            break
+                                
+                                yield self._create_error_event(
+                                    task_id=task.id,
+                                    code=-32500,
+                                    message=error_message
+                                )
+                                had_error = True
+                                break
+                            
+                            # For completed states, only send the update if we have the artifacts
+                            # Otherwise, wait for the artifacts to be available
+                            if current_state == TaskState.COMPLETED and not current_task.artifacts:
+                                # Do not send the update until we have the artifacts
+                                pass
+                            elif current_state == TaskState.CANCELLED:
+                                # For cancelled states, send the final status update immediately
+                                yield self._create_status_update_event(current_task, final=True)
+                                sent_final_update = True
+                                break
+                            elif current_state != TaskState.COMPLETED:
+                                # For other states that are not completed, send the normal update
+                                yield self._create_status_update_event(current_task, final=False)
+                        
+                        # If the state is completed and we have artifacts, first send an artifact event
+                        # followed by the final status_update with the artifacts included
+                        if current_state == TaskState.COMPLETED and current_task.artifacts and not sent_final_update:
+                            # First send the artifact as a separate event
+                            yield self._create_artifact_event(current_task)
+                            
+                            # Then send the final status with the artifacts included
+                            yield self._create_status_update_event(current_task, final=True)
+                            
+                            sent_final_update = True
+                            last_activity = current_time
+                            break
+                        
+                        # Wait before checking again
+                        await asyncio.sleep(0.5)
+                except Exception as e:
+                    # Capture errors during streaming and send as A2A error event
+                    error_message = f"Error during streaming: {str(e)}"
+                    logger.log_script_generation(
+                        task_id=task.id if task else "unknown",
+                        status="streaming_error",
+                        metadata={"error": error_message}
+                    )
+                    yield self._create_error_event(
+                        task_id=task.id if task else "unknown",
+                        code=-32000,
+                        message=error_message
+                    )
                 
-                if current_task.status.state in [TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED]:
-                    break
-                    
-                await asyncio.sleep(1)
-        
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream"
-        )
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"  # Disable proxy buffering
+                }
+            )
+            
+        except Exception as e:
+            # Capture errors during task creation
+            error_message = f"Error creating task: {str(e)}"
+            logger.log_script_generation(
+                task_id="streaming_error",
+                status="task_creation_failed",
+                metadata={"error": error_message}
+            )
+            
+            # Create a stream that only sends the error message and ends
+            async def error_stream():
+                yield self._create_error_event(
+                    task_id="error",
+                    code=-32500,
+                    message=error_message
+                )
+            
+            return StreamingResponse(
+                error_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
 
 def process_scene(scene_data: Dict[str, Any]) -> ExtractedScene:
     """Process raw scene data into an ExtractedScene object"""
@@ -374,6 +573,7 @@ async def send_task_rpc(request: Request):
     ):
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC 2.0 request for A2A protocol.")
     params = body["params"]
+
     # Required fields
     task_id = params.get("id")
     session_id = params.get("sessionId")
@@ -381,21 +581,18 @@ async def send_task_rpc(request: Request):
     metadata = params.get("metadata", {})
     if not task_id or not message or "role" not in message or "parts" not in message:
         raise HTTPException(status_code=400, detail="Missing required A2A fields in params.")
-    # Only support 'user' role for now
-    if message["role"] != "user":
-        raise HTTPException(status_code=400, detail="Only 'user' role supported for task creation.")
+
     # Extract text part (A2A allows multiple parts, but we expect at least one text part)
     text_part = next((p for p in message["parts"] if p.get("type") == "text"), None)
     if not text_part:
         raise HTTPException(status_code=400, detail="At least one text part required in message.parts.")
-    # Optionally extract structured parameters from metadata
-    # For compatibility, expect movie script params in metadata
+
     title = metadata.get("title")
     tags = metadata.get("tags")
     idea = metadata.get("idea")
     lyrics = metadata.get("lyrics")
     duration = metadata.get("duration")
-    # Validate required movie script params
+
     if not title or not tags or not idea:
         raise HTTPException(status_code=400, detail="Missing required movie script parameters in metadata (title, tags, idea).")
     # Build TaskRequest

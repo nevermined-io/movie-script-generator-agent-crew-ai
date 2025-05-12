@@ -10,12 +10,12 @@ class SceneTransformerAgent:
         """
         Creates an agent specialized in transforming scene descriptions
         
-        @param llm - Language model to use. Defaults to ChatOpenAI with gpt-4o-mini
+        @param llm - Language model to use. Defaults to ChatOpenAI with gpt-4.1-nano
         @return Agent: A CrewAI agent for scene transformation
         """
         if llm is None:
             llm = ChatOpenAI(
-                model_name="gpt-4o-mini",
+                model_name="gpt-4.1-nano",
                 temperature=0.9
             )
             

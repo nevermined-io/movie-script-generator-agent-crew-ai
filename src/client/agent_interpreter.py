@@ -45,7 +45,7 @@ class AgentCardInterpreter:
             """
             
             response = await self.client.chat.completions.create(
-                model="gpt-4-turbo-preview",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that creates valid API inputs to achieve specific goals. Only respond with raw JSON data, no markdown or explanations."},
                     {"role": "user", "content": prompt}

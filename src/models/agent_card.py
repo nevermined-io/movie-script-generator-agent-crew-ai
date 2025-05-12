@@ -22,6 +22,13 @@ class InputParameter(BaseModel):
     required: bool
     type: str
 
+class OutputSchema(BaseModel):
+    """Schema for output artifacts that will be returned by the agent."""
+    name: str
+    description: str
+    mimeType: str
+    schema: Dict[str, Any]
+
 class AgentSkill(BaseModel):
     """Skill definition for the agent."""
     id: str
@@ -32,6 +39,7 @@ class AgentSkill(BaseModel):
     inputModes: Optional[List[str]] = None
     outputModes: Optional[List[str]] = None
     parameters: Optional[List[InputParameter]] = None
+    outputSchemas: Optional[List[OutputSchema]] = None
 
 class AgentCard(BaseModel):
     """Agent Card following A2A protocol."""
@@ -83,6 +91,111 @@ class AgentCard(BaseModel):
                     description="Approximate duration of the movie in minutes",
                     required=False,
                     type="integer"
+                )
+            ],
+            outputSchemas=[
+                OutputSchema(
+                    name="scriptText",
+                    description="The complete script text with scene descriptions, technical directions, and character actions",
+                    mimeType="text/plain",
+                    schema={"type": "string"}
+                ),
+                OutputSchema(
+                    name="movieMetadata",
+                    description="Metadata about the movie, including title, genre tags, duration, scene count and characters",
+                    mimeType="application/json",
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "genre_tags": {"type": "array", "items": {"type": "string"}},
+                            "duration": {"type": "number"},
+                            "total_scenes": {"type": "integer"},
+                            "characters": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "ageRange": {"type": "string"},
+                                        "perceivedGender": {"type": "string"},
+                                        "heightBuild": {"type": "string"},
+                                        "distinctiveFeatures": {"type": "string"},
+                                        "wardrobeDetails": {"type": "string"},
+                                        "movementStyle": {"type": "string"},
+                                        "keyAccessories": {"type": "string"},
+                                        "sceneSpecificChanges": {"type": "string"},
+                                        "imagePrompt": {"type": "string"},
+                                        "role": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ),
+                OutputSchema(
+                    name="extractedScenes",
+                    description="Scene-by-scene breakdown with timing, shot types, transitions, and character actions",
+                    mimeType="application/json",
+                    schema={
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sceneNumber": {"type": "integer"},
+                                "startTime": {"type": "string"},
+                                "endTime": {"type": "string"},
+                                "shotType": {"type": "string"},
+                                "cameraMovement": {"type": "string"},
+                                "cameraEquipment": {"type": "string"},
+                                "location": {"type": "string"},
+                                "lightingSetup": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "description": {"type": "string"}
+                                    }
+                                },
+                                "colorPalette": {"type": "array", "items": {"type": "string"}},
+                                "visualReferences": {"type": "array", "items": {"type": "string"}},
+                                "characterActions": {"type": "object", "additionalProperties": {"type": "string"}},
+                                "transitionType": {"type": "string"},
+                                "specialNotes": {"type": "array", "items": {"type": "string"}}
+                            }
+                        }
+                    }
+                ),
+                OutputSchema(
+                    name="transformedScenes",
+                    description="Transformed scenes with prompts suitable for AI-based image/video generation",
+                    mimeType="application/json",
+                    schema={
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "sceneNumber": {"type": "integer"},
+                                "prompt": {"type": "string"},
+                                "charactersInScene": {"type": "array", "items": {"type": "string"}},
+                                "settingId": {"type": "string"},
+                                "duration": {"type": "integer"},
+                                "technicalDetails": {
+                                    "type": "object",
+                                    "properties": {
+                                        "shotType": {"type": "string"},
+                                        "cameraMovement": {"type": "string"},
+                                        "lens": {"type": "string"},
+                                        "cameraGear": {"type": "string"},
+                                        "lighting": {"type": "string"},
+                                        "colorPalette": {"type": "array", "items": {"type": "string"}},
+                                        "timeOfDay": {"type": "string"}
+                                    },
+                                    "required": ["colorPalette"]
+                                }
+                            }
+                        }
+                    }
                 )
             ],
             examples=[

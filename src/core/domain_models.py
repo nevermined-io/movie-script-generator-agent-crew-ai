@@ -90,15 +90,13 @@ class TransformedScene(BaseModel):
     Model for transformed scene details ready for production
     
     @param sceneNumber - Scene number in sequence
-    @param description - Scene description
     @param prompt - Scene generation prompt
     @param charactersInScene - List of character names
     @param settingId - Reference to setting
     @param duration - Scene duration in seconds
-    @param technicalDetails - Technical specifications
+    @param technicalDetails - Technical specifications (must include colorPalette)
     """
     sceneNumber: int
-    description: str
     prompt: str
     charactersInScene: List[str]
     settingId: str

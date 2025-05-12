@@ -182,7 +182,7 @@ class ScriptTasks:
 
             1. **Number of prompts**: You must produce as many objects as there are scenes in the input. Each scene must have:
               - sceneNumber (integer)
-              - prompt (string)
+              - prompt (string) - NOT description
               - charactersInScene (array of strings)
               - settingId (string)
               - duration (integer, must be 5 or 10)
@@ -202,7 +202,18 @@ class ScriptTasks:
             4. **Technical Precision**:
               - Use professional cinematography terminology
               - Include specific camera gear and lens information
-              - Maintain consistent style throughout all prompts''',
+              - Maintain consistent style throughout all prompts
+              
+            5. **Technical Details Structure**:
+              - The "technicalDetails" object MUST include:
+                * shotType (from original scene)
+                * cameraMovement (from original scene)
+                * lens (recommended lens type)
+                * cameraGear (specific equipment)
+                * lighting (lighting setup)
+                * colorPalette (MUST be included from the original scene's colorPalette)
+                * timeOfDay (when the scene takes place)
+              - The colorPalette field is REQUIRED and must contain the same color values as in the original scene''',
             agent=agent,
             expected_output="A JSON object containing an array of transformed scene objects with complete technical details",
             output_json=TransformedSceneList

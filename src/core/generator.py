@@ -20,7 +20,7 @@ class MovieScriptGenerator:
     Main class for generating movie scripts with technical details
     """
     
-    def __init__(self, model_name: str = "gpt-4o-mini"):
+    def __init__(self, model_name: str = "gpt-4.1-nano"):
         """
         Initialize the script generator
         

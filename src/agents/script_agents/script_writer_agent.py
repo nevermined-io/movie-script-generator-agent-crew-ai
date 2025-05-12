@@ -10,14 +10,14 @@ class ScriptWriterAgent:
         Creates an agent specialized in generating initial movie scripts
         
         Args:
-            llm (BaseChatModel, optional): Language model to use. Defaults to ChatOpenAI with gpt-4o-mini.
+            llm (BaseChatModel, optional): Language model to use. Defaults to ChatOpenAI with gpt-4.1-nano.
             
         Returns:
             Agent: A CrewAI agent for script writing
         """
         if llm is None:
             llm = ChatOpenAI(
-                model_name="gpt-4o-mini",
+                model_name="gpt-4.1-nano",
                 temperature=0.9
             )
             

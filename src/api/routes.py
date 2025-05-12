@@ -3,7 +3,7 @@ FastAPI routes for the Movie Script Generator Agent.
 """
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from src.core.generator import MovieScriptGenerator
 from src.api.models import ScriptRequest, ScriptResponse
 from src.models.a2a import Task, PushNotificationConfig
@@ -80,14 +80,20 @@ async def create_task(request: Request):
         duration=duration,
         sessionId=session_id
     )
-    return task
+    # Format the response as JSON-RPC 2.0
+    response = {
+        "jsonrpc": "2.0",
+        "id": body.get("id"),
+        "result": json.loads(task.json())
+    }
+    return JSONResponse(content=response)
 
 @router.post("/tasks/sendSubscribe")
 async def send_task_streaming(request: Request):
     """
     Create and process a new task with streaming updates (A2A strict JSON-RPC 2.0 only).
     @param {Request} request The HTTP request containing JSON-RPC 2.0 body
-    @returns {StreamingResponse} Stream of task updates
+    @returns {StreamingResponse} Stream of task updates in SSE format
     """
     body = await request.json()
     # Validate JSON-RPC 2.0 structure
@@ -98,25 +104,51 @@ async def send_task_streaming(request: Request):
         or "params" not in body
     ):
         raise HTTPException(status_code=400, detail="Invalid JSON-RPC 2.0 request for A2A protocol.")
+    
+    # Get request ID for SSE events
+    request_id = body.get("id")
+    
     params = body["params"]
     session_id = params.get("sessionId")
     message = params.get("message")
     metadata = params.get("metadata", {})
+    
     if not message or "role" not in message or "parts" not in message:
         raise HTTPException(status_code=400, detail="Missing required A2A fields in params.")
-    if message["role"] != "user":
-        raise HTTPException(status_code=400, detail="Only 'user' role supported for task creation.")
+    
+    if message["role"] != "user" and message["role"] != "agent":
+        raise HTTPException(status_code=400, detail="Only 'user' or 'agent' role supported for task creation.")
+    
     text_part = next((p for p in message["parts"] if p.get("type") == "text"), None)
     if not text_part:
         raise HTTPException(status_code=400, detail="At least one text part required in message.parts.")
+    
+    # Extract movie script parameters from metadata
     title = metadata.get("title")
     tags = metadata.get("tags")
     idea = metadata.get("idea")
     lyrics = metadata.get("lyrics")
     duration = metadata.get("duration")
+    
     if not title or not tags or not idea:
         raise HTTPException(status_code=400, detail="Missing required movie script parameters in metadata (title, tags, idea).")
-    return await controller.send_task_streaming(
+    
+    # Log the streaming request
+    logger.log_script_generation(
+        task_id="streaming",
+        status="streaming_requested",
+        metadata={
+            "title": title,
+            "tags": tags,
+            "idea": idea,
+            "lyrics": lyrics,
+            "duration": duration,
+            "session_id": session_id
+        }
+    )
+    
+    # Send streaming response using the controller's streaming method
+    stream_response = await controller.send_task_streaming(
         TaskRequest(
             title=title,
             tags=tags,
@@ -126,6 +158,10 @@ async def send_task_streaming(request: Request):
             sessionId=session_id
         )
     )
+    
+    # The SSE events are now formatted with the correct event types
+    # by the controller's _create_*_event methods
+    return stream_response
 
 @router.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str):
@@ -215,7 +251,7 @@ async def generate_script(request: ScriptRequest) -> Dict[str, Any]:
     logger.log_script_generation(
         task_id="legacy",
         status="direct_generation_requested",
-        metadata=request.model_dump()
+        metadata=request.dict()
     )
     try:
         script = await generator.generate_script(
@@ -228,14 +264,14 @@ async def generate_script(request: ScriptRequest) -> Dict[str, Any]:
         logger.log_script_generation(
             task_id="legacy",
             status="direct_generation_completed",
-            metadata=request.model_dump()
+            metadata=request.dict()
         )
         return script
     except Exception as e:
         logger.log_script_generation(
             task_id="legacy",
             status="direct_generation_failed",
-            metadata=request.model_dump(),
+            metadata=request.dict(),
             error=str(e)
         )
         raise HTTPException(status_code=500, detail=str(e)) 
