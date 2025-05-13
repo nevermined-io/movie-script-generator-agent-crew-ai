@@ -123,12 +123,13 @@ class ScriptTasks:
         return Task(
             name="Generate Settings",
             description='''Analyze the script and extract DISTINCT SETTINGS/LOCATIONS. For each unique setting:
-        
+
             **Important**:  
-            - The number of distinct settings/locations should be much smaller than the number of scenes (ideally 4 or 5 for the whole video).
+            - The number of distinct settings/locations should be much smaller than the number of scenes (ideally 4 to 6 for the whole video, never less than 3).
+            - Each setting must have a unique "settingId" (e.g., "setting1", "setting2", ...).
             - Multiple scenes can and should share the same setting/location when appropriate.
             - Do NOT generate one setting per scene; instead, group scenes that logically occur in the same place.
-        
+
             1. Create a detailed description including:
                - Physical space characteristics
                - Lighting conditions
@@ -136,6 +137,7 @@ class ScriptTasks:
                - Key visual elements
                - Ambient elements (weather, time of day)
                - Image style (e.g., cyberpunk, retro-futuristic, dystopian, comic book, realistic, 3D, etc.)
+               - settingId (unique string for reference)
             
             2. Generate an image prompt for each setting''',
             agent=agent,
@@ -157,16 +159,17 @@ class ScriptTasks:
 
             Important Instructions:
 
-            Include every character mentioned in the script, not only the musicians. If there are characters that are part of the narrative (such as background dancers, story characters, or extras), they must all appear in the output list.
-            Their name must match the script's name for the character.
-            If there are references to a band or musicians, list each musician separately with details including their instrument, wardrobe, and any unique features.
-            Maintain consistency with the script's descriptions (or make the best assumptions if not explicitly stated).
-            Use the provided song lyrics and tags as additional context when inferring character details.
-            For the "imagePrompt" field:
-            Synthesize all the character attributes (physical features, age, gender, height/build, distinctive features, wardrobe details, movement style, key accessories, and any scene-specific changes) into one complete, vivid visual description.
-            The prompt should serve as a detailed instruction for a visual generator, clearly conveying how the character should appear in the music video.
+            - Include every character mentioned in the script, not only the musicians. If there are characters that are part of the narrative (such as background dancers, story characters, or extras), they must all appear in the output list.
+            - Their name must match the script's name for the character.
+            - Each character must have a unique "characterId" (e.g., "character1", "character2", ...).
+            - If there are references to a band or musicians, list each musician separately with details including their instrument, wardrobe, and any unique features.
+            - Maintain consistency with the script's descriptions (or make the best assumptions if not explicitly stated).
+            - Use the provided song lyrics and tags as additional context when inferring character details.
+            - For the "imagePrompt" field:
+              Synthesize all the character attributes (physical features, age, gender, height/build, distinctive features, wardrobe details, movement style, key accessories, and any scene-specific changes) into one complete, vivid visual description.
+              The prompt should serve as a detailed instruction for a visual generator, clearly conveying how the character should appear in the music video.
 
-            Include the image style, color palette, and lighting conditions to ensure the character fits seamlessly into the video's visual aesthetic.''',
+            - There should be at least as many characters as are referenced in the script.''',
             agent=agent,
             expected_output="A JSON object containing an array of character objects with detailed profiles",
             output_json=CharacterDetailList
@@ -189,18 +192,18 @@ class ScriptTasks:
             1. **Number of prompts**: You must produce as many objects as there are scenes in the input. Each scene must have:
               - sceneNumber (integer)
               - prompt (string) - NOT description
-              - charactersInScene (array of strings)
-              - settingId (string)
+              - charactersInScene (array of strings, referencing the exact character IDs generated in the character extraction step)
+              - settingId (string, referencing the exact settingId generated in the settings step; every scene must have a valid settingId)
               - duration (integer, must be 5 or 10)
 
             2. **Character references**:
               - In "prompt", replace each character name with their full physical description
               - If the character is a musician, mention their instrument in the prompt
-              - In "charactersInScene", list only the exact character names
+              - In "charactersInScene", list only the exact character IDs
               - Exclude any characters not found in the available data
 
             3. **Scene and Setting Integration**:
-              - Each scene MUST reference an existing setting ID from the "Generate Settings" task (settings are reused across scenes; do not create a unique setting for every scene).
+              - Each scene MUST reference an existing settingId from the "Generate Settings" task (settings are reused across scenes; do not create a unique setting for every scene).
               - Include the setting's characteristics in the scene description
               - Use all available technical details (shotType, cameraMovement, etc.)
               - Ensure visual consistency with the setting's aesthetic
@@ -219,7 +222,13 @@ class ScriptTasks:
                 * lighting (lighting setup)
                 * colorPalette (MUST be included from the original scene's colorPalette)
                 * timeOfDay (when the scene takes place)
-              - The colorPalette field is REQUIRED and must contain the same color values as in the original scene''',
+
+            **MANDATORY**:  
+            - Every scene must have a valid settingId and at least one character in charactersInScene.  
+            - If a scene occurs in a location already described, use the same settingId.  
+            - If a character appears in a scene, use the exact characterId from the character list.  
+            - Do not leave charactersInScene or settingId empty.  
+            ''',
             agent=agent,
             expected_output="A JSON object containing an array of transformed scene objects with complete technical details",
             output_json=TransformedSceneList

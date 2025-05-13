@@ -25,13 +25,13 @@ class ScriptCharacter(BaseModel):
     name: str
     description: str
     ageRange: str
-    perceivedGender: str
-    heightBuild: str
-    distinctiveFeatures: str
-    wardrobeDetails: str
-    movementStyle: str
-    keyAccessories: str
-    sceneSpecificChanges: str
+    perceivedGender: Optional[str] = None
+    heightBuild: Optional[str] = None
+    distinctiveFeatures: Optional[str] = None
+    wardrobeDetails: Optional[str] = None
+    movementStyle: Optional[str] = None
+    keyAccessories: Optional[str] = None
+    sceneSpecificChanges: Optional[str] = None
     imagePrompt: str
     role: Optional[str] = None
 
@@ -50,8 +50,8 @@ class Setting(BaseModel):
     name: str
     description: str
     imagePrompt: str
-    keyFeatures: List[str]
-    technicalRequirements: Dict[str, Any]
+    keyFeatures: Optional[List[str]] = None
+    technicalRequirements: Optional[Dict[str, Any]] = None
 
 class ExtractedScene(BaseModel):
     """
@@ -69,21 +69,21 @@ class ExtractedScene(BaseModel):
     @param visualReferences - List of visual references
     @param characterActions - Map of character names to actions
     @param transitionType - Scene transition type
-    @param specialNotes - Additional technical notes
+    @param specialNotes - Additional technical notes (optional)
     """
     sceneNumber: int
     startTime: str
     endTime: str
-    shotType: str
-    cameraMovement: str
-    cameraEquipment: str
+    shotType: Optional[str] = None
+    cameraMovement: Optional[str] = None
+    cameraEquipment: Optional[str] = None
     location: str
-    lightingSetup: Dict[str, Any]
-    colorPalette: List[str]
-    visualReferences: List[str]
-    characterActions: Dict[str, str]
-    transitionType: str
-    specialNotes: List[str]
+    lightingSetup: Optional[Dict[str, Any]] = None
+    colorPalette: Optional[List[str]] = None
+    visualReferences: Optional[List[str]] = None
+    characterActions: Optional[Dict[str, str]] = None
+    transitionType: Optional[str] = None
+    specialNotes: Optional[List[str]] = None
 
 class TransformedScene(BaseModel):
     """
@@ -101,7 +101,7 @@ class TransformedScene(BaseModel):
     charactersInScene: List[str]
     settingId: str
     duration: int
-    technicalDetails: Dict[str, Any]
+    technicalDetails: Optional[Dict[str, Any]] = None
 
 class ScriptMetadata(BaseModel):
     """
