@@ -56,6 +56,7 @@ class ScriptTasks:
             - Every scene must have a duration of either 5 or 10 seconds.
             - Plan accordingly the number of scenes given the total duration of the video. 
             - Some locations may be used multiple times in the video.
+            - The total number of distinct locations/settings should be limited (ideally 4 or 5 for the whole video), and scenes should reuse locations when possible.
             - Every scene must have at least one character.
             - Optimal number of scenes: {mean_scenes}
             
@@ -122,6 +123,11 @@ class ScriptTasks:
         return Task(
             name="Generate Settings",
             description='''Analyze the script and extract DISTINCT SETTINGS/LOCATIONS. For each unique setting:
+        
+            **Important**:  
+            - The number of distinct settings/locations should be much smaller than the number of scenes (ideally 4 or 5 for the whole video).
+            - Multiple scenes can and should share the same setting/location when appropriate.
+            - Do NOT generate one setting per scene; instead, group scenes that logically occur in the same place.
         
             1. Create a detailed description including:
                - Physical space characteristics
@@ -194,7 +200,7 @@ class ScriptTasks:
               - Exclude any characters not found in the available data
 
             3. **Scene and Setting Integration**:
-              - Each scene MUST reference an existing setting ID from the "Generate Settings" task
+              - Each scene MUST reference an existing setting ID from the "Generate Settings" task (settings are reused across scenes; do not create a unique setting for every scene).
               - Include the setting's characteristics in the scene description
               - Use all available technical details (shotType, cameraMovement, etc.)
               - Ensure visual consistency with the setting's aesthetic
