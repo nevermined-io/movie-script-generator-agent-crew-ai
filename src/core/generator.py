@@ -3,7 +3,7 @@ Core functionality for generating movie scripts using AI agents
 """
 
 from typing import Dict, Any
-from crewai import Agent, Crew, Task
+from crewai import Agent, Crew, Task, LLM
 from langchain_openai import ChatOpenAI
 from src.tasks.script_tasks import ScriptTasks
 from src.agents.script_agents.script_writer_agent import ScriptWriterAgent
@@ -31,15 +31,32 @@ class MovieScriptGenerator:
         
         @param model_name - Name of the LLM model to use
         """
-        self.llm = ChatOpenAI(
-            model_name=model_name,
+        # self.llm = ChatOpenAI(
+        #     model_name=model_name,
+        #     temperature=0.9,
+        #     request_timeout=60,
+        #     max_retries=3,
+        #     streaming=False,
+        #     openai_api_key=os.getenv("OPENAI_API_KEY"),
+        #     model_kwargs={
+        #         "extra_headers": {
+        #             "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+        #         }
+        #     },
+        #     openai_api_base="https://oai.helicone.ai/v1"
+        # )
+
+        self.llm = LLM(
+            model=model_name,
             temperature=0.9,
             request_timeout=60,
             max_retries=3,
-            streaming=True,
+            stream=True,
             base_url="https://oai.helicone.ai/v1",
-            default_headers={
-                "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            extra_headers={
+                "Helicone-Auth": f"Bearer {os.environ.get('HELICONE_API_KEY')}",
+                "helicone-stream-usage": "true",
             }
         )
 

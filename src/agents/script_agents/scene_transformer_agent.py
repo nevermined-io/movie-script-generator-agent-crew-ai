@@ -1,5 +1,4 @@
-from crewai import Agent
-from langchain_openai import ChatOpenAI
+from crewai import Agent, LLM
 from src.tools.scene_tools import AdjustSceneDurationsTool
 from dotenv import load_dotenv
 import os
@@ -15,16 +14,21 @@ class SceneTransformerAgent:
         """
         Creates an agent specialized in transforming scene descriptions
         
-        @param llm - Language model to use. Defaults to ChatOpenAI with gpt-4.1-nano
+        @param llm - Language model to use. Defaults to LLM with gpt-4.1-nano
         @return Agent: A CrewAI agent for scene transformation
         """
         if llm is None:
-            llm = ChatOpenAI(
-                model_name="gpt-4.1-nano",
+            llm = LLM(
+                model="gpt-4.1-nano",
                 temperature=0.9,
+                request_timeout=60,
+                max_retries=3,
+                stream=True,
                 base_url="https://oai.helicone.ai/v1",
-                default_headers={
-                    "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                extra_headers={
+                    "Helicone-Auth": f"Bearer {os.environ.get('HELICONE_API_KEY')}",
+                    "helicone-stream-usage": "true",
                 }
             )
             
