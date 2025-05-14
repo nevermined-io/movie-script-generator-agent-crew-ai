@@ -1,5 +1,10 @@
 from crewai import Agent
 from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+import os
+
+# Load environment variables with override
+load_dotenv(override=True)
 
 class SceneExtractorAgent:
     """Agent specialized in extracting and organizing scenes from scripts"""
@@ -22,6 +27,10 @@ class SceneExtractorAgent:
             allow_delegation=False,
             llm=ChatOpenAI(
                 model_name="gpt-4.1-nano",
-                temperature=0.7
+                temperature=0.7,
+                base_url="https://oai.helicone.ai/v1",
+                default_headers={
+                    "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+                }
             )
         ) 

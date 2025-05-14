@@ -14,6 +14,11 @@ import json
 import math
 import traceback
 from tenacity import retry, stop_after_attempt, wait_exponential
+import os
+from dotenv import load_dotenv
+
+# Load environment variables with override
+load_dotenv(override=True)
 
 class MovieScriptGenerator:
     """
@@ -31,7 +36,11 @@ class MovieScriptGenerator:
             temperature=0.9,
             request_timeout=60,
             max_retries=3,
-            streaming=True
+            streaming=True,
+            base_url="https://oai.helicone.ai/v1",
+            default_headers={
+                "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+            }
         )
 
     @retry(

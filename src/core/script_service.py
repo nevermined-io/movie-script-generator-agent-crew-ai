@@ -17,7 +17,13 @@ class ScriptService:
         """
         Initialize the script service with OpenAI client
         """
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url="https://oai.helicone.ai/v1",
+            default_headers={
+                "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+            }
+        )
         
     async def generate_script(self, prompt: str, metadata: Optional[Dict[str, Any]] = None) -> Tuple[str, List[Dict[str, Any]]]:
         """

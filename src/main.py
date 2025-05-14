@@ -8,7 +8,7 @@ import uvicorn
 from api.app import app
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(override=True)
 
 def main():
     """Start the FastAPI application with uvicorn"""

@@ -1,6 +1,11 @@
 from crewai import Agent
 from langchain_openai import ChatOpenAI
 from src.tools.scene_tools import AdjustSceneDurationsTool
+from dotenv import load_dotenv
+import os
+
+# Load environment variables with override
+load_dotenv(override=True)
 
 class SceneTransformerAgent:
     """Agent specialized in transforming scene descriptions into detailed formats"""
@@ -16,7 +21,11 @@ class SceneTransformerAgent:
         if llm is None:
             llm = ChatOpenAI(
                 model_name="gpt-4.1-nano",
-                temperature=0.9
+                temperature=0.9,
+                base_url="https://oai.helicone.ai/v1",
+                default_headers={
+                    "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+                }
             )
             
         return Agent(
