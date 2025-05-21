@@ -2,12 +2,16 @@ from crewai import Agent, LLM
 from src.tools.scene_tools import AdjustSceneDurationsTool
 from dotenv import load_dotenv
 import os
+import uuid
 
 # Load environment variables with override
 load_dotenv(override=True)
 
 class SceneTransformerAgent:
     """Agent specialized in transforming scene descriptions into detailed formats"""
+    
+    # Create a deterministic UUID based on the class name
+    agent_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "SceneTransformerAgent"))
     
     @staticmethod
     def create(llm=None):
@@ -29,6 +33,7 @@ class SceneTransformerAgent:
                 extra_headers={
                     "Helicone-Auth": f"Bearer {os.environ.get('HELICONE_API_KEY')}",
                     "helicone-stream-usage": "true",
+                    "Helicone-Property-AgentId": SceneTransformerAgent.agent_id,
                 }
             )
             

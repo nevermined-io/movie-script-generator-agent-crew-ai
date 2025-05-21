@@ -35,7 +35,7 @@ def setup_openai_client() -> OpenAI:
     )
     return client
 
-def setup_langchain_client(model_name: str = "gpt-4.1-nano") -> ChatOpenAI:
+def setup_langchain_client(model_name: str = "gpt-4o") -> ChatOpenAI:
     """Configure Langchain OpenAI client with Helicone headers."""
     # Get API keys from environment variables
     openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -63,7 +63,7 @@ def setup_langchain_client(model_name: str = "gpt-4.1-nano") -> ChatOpenAI:
     )
     return client
 
-def make_openai_completion(client: OpenAI, prompt: str, model: str = "gpt-4.1-nano") -> Dict[str, Any]:
+def make_openai_completion(client: OpenAI, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:
     """
     Make a completion request using base OpenAI client through Helicone.
     

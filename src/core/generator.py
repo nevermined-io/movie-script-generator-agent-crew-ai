@@ -90,8 +90,8 @@ class MovieScriptGenerator:
             )
 
             # Create agents
-            script_writer = ScriptWriterAgent.create(self.llm)
-            scene_transformer = SceneTransformerAgent.create(self.llm)
+            script_writer = ScriptWriterAgent.create()
+            scene_transformer = SceneTransformerAgent.create()
             minScenes = math.floor(duration / 10)
             maxScenes = math.floor(duration / 5)
             meanScenes = math.floor((minScenes + maxScenes) / 2)
