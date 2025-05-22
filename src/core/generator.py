@@ -2,7 +2,7 @@
 Core functionality for generating movie scripts using AI agents
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Type
 from crewai import Agent, Crew, Task, LLM
 from langchain_openai import ChatOpenAI
 from src.tasks.script_tasks import ScriptTasks
@@ -16,6 +16,9 @@ import traceback
 from tenacity import retry, stop_after_attempt, wait_exponential
 import os
 from dotenv import load_dotenv
+import uuid
+from datetime import datetime
+import inspect
 
 # Load environment variables with override
 load_dotenv(override=True)
@@ -31,21 +34,6 @@ class MovieScriptGenerator:
         
         @param model_name - Name of the LLM model to use
         """
-        # self.llm = ChatOpenAI(
-        #     model_name=model_name,
-        #     temperature=0.9,
-        #     request_timeout=60,
-        #     max_retries=3,
-        #     streaming=False,
-        #     openai_api_key=os.getenv("OPENAI_API_KEY"),
-        #     model_kwargs={
-        #         "extra_headers": {
-        #             "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
-        #         }
-        #     },
-        #     openai_api_base="https://oai.helicone.ai/v1"
-        # )
-
         self.llm = LLM(
             model=model_name,
             temperature=0.9,
@@ -59,6 +47,52 @@ class MovieScriptGenerator:
                 "helicone-stream-usage": "true",
             }
         )
+
+    def _get_agent_classes(self) -> List[Type]:
+        """
+        Get all agent classes from the script_agents module
+        
+        Returns:
+            List[Type]: List of agent classes
+        """
+        # Import the modules directly
+        from src.agents.script_agents.script_writer_agent import ScriptWriterAgent
+        from src.agents.script_agents.scene_transformer_agent import SceneTransformerAgent
+        
+        # Return the known agent classes
+        return [ScriptWriterAgent, SceneTransformerAgent]
+
+    def _get_agent_ids(self) -> Dict[str, str]:
+        """
+        Get agent IDs from all agent classes
+        
+        Returns:
+            Dict[str, str]: Dictionary mapping agent class names to their IDs
+        """
+        agent_ids = {}
+        for agent_class in self._get_agent_classes():
+            if hasattr(agent_class, 'agent_id'):
+                agent_ids[agent_class.__name__] = agent_class.agent_id
+        return agent_ids
+
+    def _log_session_info(self, session_id: str, agent_ids: Dict[str, str]):
+        """
+        Log session and agent IDs to a timestamped file
+        
+        Args:
+            session_id (str): The session ID
+            agent_ids (Dict[str, str]): Dictionary of agent names and their IDs
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = os.path.join("src", "logs", f"session_{timestamp}.txt")
+        
+        log_content = f"Session ID: {session_id}\n"
+        log_content += "Agent IDs:\n"
+        for agent_name, agent_id in agent_ids.items():
+            log_content += f"{agent_name}: {agent_id}\n"
+            
+        with open(log_file, "w") as f:
+            f.write(log_content)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -76,6 +110,21 @@ class MovieScriptGenerator:
         @return Dictionary containing the complete script details
         """
         try:
+            # Generate session ID
+            session_id = str(uuid.uuid4())
+            
+            # Create agents with session ID
+            script_writer = ScriptWriterAgent.create(sessionId=session_id)
+            scene_transformer = SceneTransformerAgent.create(sessionId=session_id)
+            
+            # Log session and agent IDs
+            agent_ids = self._get_agent_ids()
+            self._log_session_info(session_id, agent_ids)
+            
+            minScenes = math.floor(duration / 10)
+            maxScenes = math.floor(duration / 5)
+            meanScenes = math.floor((minScenes + maxScenes) / 2)
+
             # Log start of script generation
             logger.log_script_generation(
                 task_id="internal",
@@ -85,16 +134,10 @@ class MovieScriptGenerator:
                     "tags": tags,
                     "lyrics": lyrics,
                     "idea": idea,
-                    "duration": duration
+                    "duration": duration,
+                    "session_id": session_id
                 }
             )
-
-            # Create agents
-            script_writer = ScriptWriterAgent.create()
-            scene_transformer = SceneTransformerAgent.create()
-            minScenes = math.floor(duration / 10)
-            maxScenes = math.floor(duration / 5)
-            meanScenes = math.floor((minScenes + maxScenes) / 2)
 
             # Log agent creation
             logger.log_script_generation(
@@ -103,7 +146,8 @@ class MovieScriptGenerator:
                 metadata={
                     "min_scenes": minScenes,
                     "max_scenes": maxScenes,
-                    "mean_scenes": meanScenes
+                    "mean_scenes": meanScenes,
+                    "session_id": session_id
                 }
             )
 
@@ -129,7 +173,8 @@ class MovieScriptGenerator:
                 task_id="internal",
                 status="crew_started",
                 metadata={
-                    "total_tasks": len(tasks)
+                    "total_tasks": len(tasks),
+                    "session_id": session_id
                 }
             )
 
@@ -142,7 +187,9 @@ class MovieScriptGenerator:
                 "scenes": result.tasks_output[1].json_dict["scenes"],  # Extracted scenes from second task
                 "settings": result.tasks_output[2].json_dict["settings"],  # Settings from third task
                 "characters": result.tasks_output[3].json_dict["characters"],  # Characters from fourth task
-                "transformedScenes": result.tasks_output[4].json_dict["scenes"]  # Transformed scenes from fifth task
+                "transformedScenes": result.tasks_output[4].json_dict["scenes"],  # Transformed scenes from fifth task
+                "session_id": session_id,  # Add session ID
+                "agent_ids": agent_ids  # Add agent IDs
             }
 
             # Log successful generation
@@ -151,7 +198,8 @@ class MovieScriptGenerator:
                 status="generation_complete",
                 metadata={
                     "total_scenes": len(script_result["scenes"]),
-                    "total_characters": len(script_result["characters"])
+                    "total_characters": len(script_result["characters"]),
+                    "session_id": session_id
                 }
             )
 
@@ -165,7 +213,8 @@ class MovieScriptGenerator:
                 status="generation_failed",
                 metadata={
                     "title": title,
-                    "duration": duration
+                    "duration": duration,
+                    "session_id": session_id if 'session_id' in locals() else None
                 },
                 error=str(e)
             )

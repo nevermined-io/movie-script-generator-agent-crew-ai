@@ -11,3 +11,4 @@ movie_script_generator.log
 .pytest_cache/
 requirements.old.txt
 *.pyc
+src/logs/*

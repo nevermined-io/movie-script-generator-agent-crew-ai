@@ -13,12 +13,13 @@ class SceneExtractorAgent:
     agent_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "SceneExtractorAgent"))
     
     @staticmethod
-    def create(llm=None):
+    def create(llm=None, sessionId=None):
         """
         Creates an agent specialized in extracting and organizing scenes from scripts
         
         Args:
             llm (BaseChatModel, optional): Language model to use. Defaults to LLM with gpt-4.1-nano.
+            sessionId (str, optional): Session identifier for tracking. Defaults to None.
             
         Returns:
             Agent: A CrewAI agent for scene extraction
@@ -36,6 +37,7 @@ class SceneExtractorAgent:
                     "Helicone-Auth": f"Bearer {os.environ.get('HELICONE_API_KEY')}",
                     "helicone-stream-usage": "true",
                     "Helicone-Property-AgentId": SceneExtractorAgent.agent_id,
+                    "Helicone-Property-SessionId": sessionId if sessionId else "",
                 }
             )
             

@@ -14,12 +14,16 @@ class SceneTransformerAgent:
     agent_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "SceneTransformerAgent"))
     
     @staticmethod
-    def create(llm=None):
+    def create(llm=None, sessionId=None):
         """
         Creates an agent specialized in transforming scene descriptions
         
-        @param llm - Language model to use. Defaults to LLM with gpt-4.1-nano
-        @return Agent: A CrewAI agent for scene transformation
+        Args:
+            llm (BaseChatModel, optional): Language model to use. Defaults to LLM with gpt-4.1-nano.
+            sessionId (str, optional): Session identifier for tracking. Defaults to None.
+            
+        Returns:
+            Agent: A CrewAI agent for scene transformation
         """
         if llm is None:
             llm = LLM(
@@ -34,6 +38,7 @@ class SceneTransformerAgent:
                     "Helicone-Auth": f"Bearer {os.environ.get('HELICONE_API_KEY')}",
                     "helicone-stream-usage": "true",
                     "Helicone-Property-AgentId": SceneTransformerAgent.agent_id,
+                    "Helicone-Property-SessionId": sessionId if sessionId else "",
                 }
             )
             

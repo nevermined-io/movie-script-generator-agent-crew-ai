@@ -4,62 +4,129 @@ from datetime import datetime
 import csv
 import os
 from collections import defaultdict
+import glob
 
-def create_agent_filter(agent_ids):
+def get_latest_session_info():
     """
-    Create a custom filter for multiple agent IDs.
+    Get the session ID and agent IDs from the latest session log file.
+    
+    Returns:
+        tuple: (session_id, list of agent_ids) or (None, []) if no log file found
+    """
+    # Get all session log files
+    log_files = glob.glob("src/logs/session_*.txt")
+    
+    if not log_files:
+        return None, []
+    
+    # Get the most recent log file
+    latest_file = max(log_files, key=os.path.getctime)
+    
+    try:
+        with open(latest_file, 'r') as f:
+            content = f.read()
+            
+        # Extract session ID
+        session_id = None
+        agent_ids = []
+        
+        for line in content.split('\n'):
+            if line.startswith('Session ID:'):
+                session_id = line.split('Session ID:')[1].strip()
+            elif ':' in line and not line.startswith('Session ID:'):
+                # Extract agent ID from lines like "AgentName: agent_id"
+                agent_id = line.split(':')[1].strip()
+                if agent_id:  # Only add non-empty agent IDs
+                    agent_ids.append(agent_id)
+        
+        return session_id, agent_ids
+    except Exception as e:
+        print(f"Error reading session log file: {e}")
+        return None, []
+
+def create_agent_filter(agent_ids, session_id=None):
+    """
+    Create a custom filter for multiple agent IDs and session ID.
+    Uses OR for agent IDs and AND for session ID to get requests for specific agents in a specific session.
     
     Args:
         agent_ids (list): List of agent IDs to filter by
+        session_id (str, optional): Session ID to filter by
         
     Returns:
         dict: Custom filter configuration for Helicone query
     """
-    if not agent_ids:
-        # If no agent IDs are provided, return a filter that matches all requests
+    # If no filters are provided, return a filter that matches all requests
+    if not agent_ids and not session_id:
         return "all"
     
+    # If only session ID is provided
+    if not agent_ids and session_id:
+        return {
+            "request_response_rmt": {
+                "properties": {
+                    "sessionid": {"equals": session_id}
+                }
+            }
+        }
+    
     # Start with the first agent ID
-    filter_conditions = {
+    agent_filter = {
         "request_response_rmt": {
             "properties": {
-                "agentid": {
-                    "equals": agent_ids[0]
-                }
+                "agentid": {"equals": agent_ids[0]}
             }
         }
     }
     
     # Add remaining agent IDs using OR operator
     for agent_id in agent_ids[1:]:
-        filter_conditions = {
+        agent_filter = {
             "operator": "or",
-            "left": filter_conditions,
+            "left": agent_filter,
             "right": {
                 "request_response_rmt": {
                     "properties": {
-                        "agentid": {
-                            "equals": agent_id
-                        }
+                        "agentid": {"equals": agent_id}
                     }
                 }
             }
         }
     
-    return filter_conditions
+    # If no session ID, return just the agent filter
+    if not session_id:
+        return agent_filter
+    
+    # Add session ID using AND operator
+    agent_filter = {
+        "operator": "and",
+        "left": agent_filter,
+        "right": {
+            "request_response_rmt": {
+                "properties": {
+                    "sessionid": {"equals": session_id}
+                }
+            }
+        }
+    }
 
-def process_payments(margin=0.05, usd_to_credit_rate=1000.0, agent_ids=None, limit=10, offset=0):
+    return agent_filter
+
+def process_payments(margin=0.05, usd_to_credit_rate=1000.0, agent_ids=None, session_id=None, limit=10, offset=0):
     """
     Process payment statistics and print summary, including a margin for pricing and credit conversion.
     :param margin: The margin to apply to the total cost (default 5%)
     :param usd_to_credit_rate: Exchange rate from USD to credits (default 1.0)
     :param agent_ids: List of agent IDs to filter by (default None)
+    :param session_id: Session ID to filter by (default None)
+    :param limit: Maximum number of requests to process (default 10)
+    :param offset: Number of requests to skip (default 0)
     """
     # Initialize the client with your API key
     client = HeliconeClient()
 
-    # Create custom filter based on agent IDs
-    custom_filter = create_agent_filter(agent_ids) if agent_ids else "all"
+    # Create custom filter based on agent IDs and session ID
+    custom_filter = create_agent_filter(agent_ids, session_id)
 
     # Or customize the query parameters
     response = client.query_clickhouse(
@@ -187,14 +254,32 @@ def process_payments(margin=0.05, usd_to_credit_rate=1000.0, agent_ids=None, lim
             print(f"{provider}: {count} requests ({count/total_requests*100:.1f}%)")
     else:
         print("No requests found in the response")
+        
+    # Print filter information at the end
+    print("\nFilter Information:")
+    print(f"Session ID: {session_id}")
+    print(f"Agent IDs ({len(agent_ids) if agent_ids else 0}):")
+    if agent_ids:
+        for agent_id in agent_ids:
+            print(f"- {agent_id}")
 
 if __name__ == "__main__":
-    agent_ids = [
-        #"1234567890",
-        "b24607ff-4934-5ced-b578-c57a69afb660",
-        "c2687b82-4249-5b22-8e60-abae67edb2fb"
-    ]
-    process_payments(agent_ids=agent_ids, limit=50, offset=0)  # Default margin is 5% and default exchange rate is 1.0 credits/USD
+    # Get agent IDs and session ID from the latest session log file
+    session_id, agent_ids = get_latest_session_info()
+    
+    if agent_ids:
+        print(f"\nProcessing payments for session: {session_id}")
+        print(f"Found {len(agent_ids)} agents:")
+        for agent_id in agent_ids:
+            print(f"- {agent_id}")
+        process_payments(
+            agent_ids=agent_ids,
+            session_id=session_id,
+            limit=50,
+            offset=0
+        )  # Default margin is 5% and default exchange rate is 1.0 credits/USD
+    else:
+        print("No agent IDs found in the latest session log file")
 
 # custom_filter = {
 # "request_response_rmt": {
